@@ -5,10 +5,13 @@ import sys
 from datetime import date
 from pathlib import Path
 
+import pytest
+
 from app.agents import ALL_AGENTS
 from app.catalog import ALL_CATALOG
 from app.formatter import render
 from app.models import Assessment
+from app.providers import MiniMaxProvider, ProviderRegistry
 from app.runner import run
 
 REPO_ROOT = Path("/Users/pauloribeiro/Desktop/Projetos/financial-adviser")
@@ -136,3 +139,50 @@ def test_cli_end_to_end_with_mock(tmp_path: Path) -> None:
     content = output.read_text(encoding="utf-8")
     assert "# Macro Assessment Run" in content
     assert "buffett" in content.lower()
+
+
+def test_minimax_provider_requires_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Without MINIMAX_API_KEY, MiniMaxProvider.get_model() raises ValueError."""
+    monkeypatch.delenv("MINIMAX_API_KEY", raising=False)
+    ProviderRegistry._providers.clear()
+    ProviderRegistry.initialize_defaults()
+    minimax = ProviderRegistry.get("minimax")
+    assert isinstance(minimax, MiniMaxProvider)
+    with pytest.raises(ValueError, match="MINIMAX_API_KEY"):
+        minimax.get_model()
+
+
+def test_runner_aborts_when_provider_unconfigured(monkeypatch: pytest.MonkeyPatch) -> None:
+    """runner.run() raises a single RuntimeError instead of N failures when the
+    provider is missing the API key."""
+    monkeypatch.delenv("MINIMAX_API_KEY", raising=False)
+    ProviderRegistry._providers.clear()
+    ProviderRegistry.initialize_defaults()
+    with pytest.raises(RuntimeError, match="MINIMAX_API_KEY"):
+        run(["buffett", "burry", "dimon"], ["US.FFR", "US.UST10Y"], provider_name="minimax")
+
+
+def test_cli_exits_2_when_api_key_missing(tmp_path: Path) -> None:
+    """End-to-end: --provider minimax without MINIMAX_API_KEY exits with code 2 and
+    a single clear error message on stderr."""
+    output = tmp_path / "out.md"
+    env = {k: v for k, v in __import__("os").environ.items() if k != "MINIMAX_API_KEY"}
+    result = subprocess.run(
+        [
+            sys.executable, "-m", "app.main",
+            "--analysts", "buffett",
+            "--indicators", "US.FFR",
+            "--provider", "minimax",
+            "--format", "md",
+            "--output", str(output),
+            "--env", "development",
+        ],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(REPO_ROOT),
+    )
+    assert result.returncode == 2, f"stderr: {result.stderr}"
+    assert "MINIMAX_API_KEY" in result.stderr
+    assert "mock" in result.stderr  # the hint
+    assert not output.exists()  # no MD written when run fails

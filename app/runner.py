@@ -68,6 +68,7 @@ def run(
     )
 
     results: list[Assessment] = []
+    init_error: str | None = None
     with ThreadPoolExecutor(max_workers=pool_size) as executor:
         futures = {
             executor.submit(agents[aid].generate_assessment, ind, target_date): (aid, ind)
@@ -78,8 +79,19 @@ def run(
             try:
                 results.append(fut.result())
                 log.info("runner.assessment_done", agent=aid, indicator=ind)
+            except RuntimeError as e:
+                msg = str(e)
+                log.error("runner.assessment_failed", agent=aid, indicator=ind, error=msg)
+                if init_error is None:
+                    init_error = msg
+                    for f in futures:
+                        f.cancel()
             except Exception as e:
                 log.error("runner.assessment_failed", agent=aid, indicator=ind, error=str(e))
+
+    if init_error is not None:
+        log.error("runner.aborted_due_to_init_error", error=init_error)
+        raise RuntimeError(init_error)
 
     log.info("runner.complete", n_results=len(results))
     return results

@@ -47,12 +47,17 @@ def main(argv: list[str] | None = None) -> int:
         else (datetime.strptime(args.target_date, "%Y-%m-%d").date() if args.target_date else date.today())
     )
 
-    results = run(
-        analysts=analysts,
-        indicators=indicators,
-        target_date=target_date,
-        provider_name=args.provider,
-    )
+    try:
+        results = run(
+            analysts=analysts,
+            indicators=indicators,
+            target_date=target_date,
+            provider_name=args.provider,
+        )
+    except RuntimeError as e:
+        print(f"\nERROR: {e}", file=sys.stderr)
+        print("Hint: did you forget to set MINIMAX_API_KEY? Try `--provider mock` for offline mode.", file=sys.stderr)
+        return 2
 
     completed_at = datetime.now().isoformat(timespec="seconds")
     meta = {

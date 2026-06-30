@@ -160,12 +160,20 @@ class BaseAgent(ABC):
         self.provider_name = provider_name
         self.provider: LLMProvider = ProviderRegistry.get(provider_name)
         self.langfuse_handler = langfuse_handler if langfuse_handler is not None else _make_langfuse_handler()
-        self._model = self.provider.get_model()
-        self._structured = (
-            self._model.with_structured_output(Assessment)
-            if _has_structured_output(self._model)
-            else None
-        )
+        self._init_error: str | None = None
+        self._model: Any | None = None
+        self._structured: Any | None = None
+        try:
+            self._model = self.provider.get_model()
+            self._structured = (
+                self._model.with_structured_output(Assessment)
+                if _has_structured_output(self._model)
+                else None
+            )
+        except Exception as e:
+            self._init_error = str(e)
+            log.warning("agent.init_failed", agent_id=self.agent_id, error=self._init_error)
+            return
         log.info("agent.initialized", agent_id=self.agent_id, provider=provider_name)
 
     def _invoke_config(self, indicator_id: str) -> dict:
@@ -191,6 +199,8 @@ class BaseAgent(ABC):
         )
 
     def generate_assessment(self, indicator_id: str, target_date: date) -> Assessment:
+        if self._init_error is not None or self._model is None:
+            raise RuntimeError(self._init_error or "agent model not initialized")
         messages = [
             {"role": "system", "content": self.get_system_prompt()},
             {"role": "user", "content": self.get_user_prompt(indicator_id, target_date)},

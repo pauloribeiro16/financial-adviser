@@ -29,14 +29,24 @@ class MiniMaxProvider(LLMProvider):
         self.base_url = base_url
         self._client: ChatAnthropic | None = None
 
+    def _require_api_key(self) -> str:
+        if not self.api_key or self.api_key.strip() == "":
+            raise ValueError(
+                "MINIMAX_API_KEY is not set. Either set the environment variable "
+                "(export MINIMAX_API_KEY=sk-...) or pass api_key=... to MiniMaxProvider. "
+                "For offline mode, use --provider mock."
+            )
+        return self.api_key
+
     def provider_name(self) -> str:
         return f"minimax:{self.model}"
 
     def get_model(self) -> ChatAnthropic:
         if self._client is None:
+            api_key = self._require_api_key()
             self._client = ChatAnthropic(
                 model=self.model,
-                api_key=self.api_key,
+                api_key=api_key,
                 anthropic_api_url=self.base_url,
                 temperature=1.0,
             )
