@@ -13,6 +13,8 @@ data/*
 !data/.gitkeep
 !data/
 
+out/
+
 
 .ruff_cache/
 .mypy_cache/

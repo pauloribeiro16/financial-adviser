@@ -21,11 +21,42 @@ $EDITOR .env   # MINIMAX_API_KEY=sk-...
 python -m app.main --analysts buffett --indicators US.UST10Y --provider mock
 
 # 4. run all 15 personas × all 8 indicators (real LLM)
-python -m app.main --provider minimax > run.json
+python -m app.main --provider minimax --format json > run.json
 ```
 
 `--provider mock` runs offline with placeholder output — perfect for tests and CI.
 `--provider minimax` calls the real Anthropic-compatible API.
+
+### Output formats
+
+`--format {md,json}` controls the output shape. Default is `md`.
+
+| Format | Default path | With `--output PATH` |
+|--------|--------------|----------------------|
+| `md`   | `./out/run_<YYYYMMDD_HHMMSS>.md` | writes to `PATH` |
+| `json` | stdout                          | writes to `PATH` |
+
+```bash
+# Markdown to default location (./out/run_<timestamp>.md)
+python -m app.main --analysts buffett --indicators US.FFR --provider mock --format md
+
+# Markdown to a specific path
+python -m app.main --analysts buffett --indicators US.FFR --provider mock \
+  --format md --output /tmp/buffett-ffr.md
+
+# JSON to stdout (existing behaviour)
+python -m app.main --analysts buffett --indicators US.FFR --provider mock --format json
+```
+
+### Running tests
+
+```bash
+pip install -e ".[dev]"
+pytest tests/
+```
+
+The suite covers the catalog, persona registry, schema round-trip, mock-provider
+end-to-end, runner fan-out, markdown formatter, and the CLI (`--format md`).
 
 ## What you get
 
