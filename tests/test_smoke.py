@@ -167,6 +167,7 @@ def test_cli_exits_2_when_api_key_missing(tmp_path: Path) -> None:
     a single clear error message on stderr."""
     output = tmp_path / "out.md"
     env = {k: v for k, v in __import__("os").environ.items() if k != "MINIMAX_API_KEY"}
+    env["FA_SKIP_DOTENV"] = "1"  # bypass .env loading so the API key is truly absent
     result = subprocess.run(
         [
             sys.executable, "-m", "app.main",

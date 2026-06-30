@@ -13,15 +13,19 @@ Volcker, Dimon, Eisman, Grantham, Simons, Taleb, Wood, Gundlach, Thaler) interpr
 # 1. install
 pip install -e .
 
-# 2. (optional) set your LLM API key
-cp .env.example .env
-$EDITOR .env   # MINIMAX_API_KEY=sk-...
+# 2. (optional) copy .env from the source project, or set API key
+cp /path/to/macro-forecasting-league/.env .env   # or:
+cp .env.example .env && $EDITOR .env             # MINIMAX_API_KEY=sk-...
 
 # 3. run a single persona against one indicator
 python -m app.main --analysts buffett --indicators US.UST10Y --provider mock
 
 # 4. run all 15 personas × all 8 indicators (real LLM)
 python -m app.main --provider minimax --format json > run.json
+```
+
+The CLI auto-loads `./.env` via python-dotenv (when installed). To skip .env
+loading (e.g. in tests), set `FA_SKIP_DOTENV=1` in the environment.
 ```
 
 `--provider mock` runs offline with placeholder output — perfect for tests and CI.

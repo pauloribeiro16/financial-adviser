@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from datetime import date, datetime
 from pathlib import Path
@@ -12,6 +13,13 @@ from app.catalog import get_target_indicators
 from app.formatter import default_output_path, ensure_parent_dir, render
 from app.logging import setup_logging
 from app.runner import run
+
+try:
+    from dotenv import load_dotenv
+
+    HAS_DOTENV = True
+except ImportError:
+    HAS_DOTENV = False
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -35,7 +43,8 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
-    import os
+    if HAS_DOTENV and not os.getenv("FA_SKIP_DOTENV"):
+        load_dotenv(dotenv_path=Path(__file__).resolve().parent.parent / ".env", override=False)
     os.environ["MFL_ENV"] = args.env
     setup_logging(service="mi")
 
