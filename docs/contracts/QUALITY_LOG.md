@@ -9,6 +9,7 @@ Format: `Sprint | Date | Criteria Pass | Avg @k | Verdict | Notes`
 | S3a    | 2026-07-01 | (rollback)     | —               | —          | VOID    | Lifted DuckDBStore (486 LOC) + LangfuseHandler (71 LOC) verbatim. **Rolled back** on user pivot: no DuckDB, "remodelação, menos código". Files deleted from repo. |
 | MVP    | 2026-07-01 | —              | —               | —          | PASS    | **MVP simplification**: 7 Python files, 781 LOC total. agent.py = 319 LOC (single file: BaseAgent + 15 personas + T0/T1/T2 loader + JSON fallback). runner.py = 85 LOC (ThreadPoolExecutor). main.py = 76 LOC (CLI). Flattened dir (no `core/`, `models/`, `services/`). Persona .md content lifted (259 files, 6886 LOC). `with_structured_output(Assessment)` + Langfuse-optional. End-to-end CLI smoke passed with `--provider mock`. |
 | S4     | 2026-07-01 | 18/18          | 2/2             | 3/3        | PASS    | Markdown formatter (`app/formatter.py`, ~145 LOC) + CLI `--format {md,json}` (default `md` → `./out/run_<TS>.md`) + pytest smoke suite (8 tests). Total new/modified ~265 LOC. Ruff clean. |
+| S5     | 2026-07-01 | 18/18          | 2/2             | 3/3        | PASS    | Per-agent `.md` layout (`render_per_agent` + `render_summary` + `default_run_dir`) + `--format per-agent` default + `--indicators` default = `US.UST10Y` + empty-indicators guard (exit 1) + 2 new tests (13 total). Ruff clean. run_id aligns with default_run_dir() for link consistency. |
 
 ## Pivots / Architecture Changes
 

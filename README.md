@@ -33,14 +33,25 @@ loading (e.g. in tests), set `FA_SKIP_DOTENV=1` in the environment.
 
 ### Output formats
 
-`--format {md,json}` controls the output shape. Default is `md`.
+`--format {md,json,per-agent}` controls the output shape. Default is `per-agent`.
 
-| Format | Default path | With `--output PATH` |
-|--------|--------------|----------------------|
-| `md`   | `./out/run_<YYYYMMDD_HHMMSS>.md` | writes to `PATH` |
-| `json` | stdout                          | writes to `PATH` |
+| Format        | Default path                                | With `--output PATH` |
+|---------------|---------------------------------------------|----------------------|
+| `per-agent`   | `./out/run_<YYYYMMDD_HHMMSS_<µs>/` (tree)   | writes tree to `PATH` |
+| `md`          | `./out/run_<YYYYMMDD_HHMMSS>.md`            | writes to `PATH`     |
+| `json`        | stdout                                      | writes to `PATH`     |
+
+When `--indicators` is omitted, the CLI defaults to a single indicator: `US.UST10Y`.
+Pass an explicit `--indicators ""` (empty) to get a clear error and exit code 1.
 
 ```bash
+# Per-agent layout (default): _summary.md + one .md per (persona, indicator)
+python -m app.main --analysts buffett --indicators US.FFR --provider mock
+
+# Per-agent to a specific dir (replaces the timestamp dir)
+python -m app.main --analysts buffett,burry --indicators US.FFR \
+  --provider mock --format per-agent --output /tmp/run1
+
 # Markdown to default location (./out/run_<timestamp>.md)
 python -m app.main --analysts buffett --indicators US.FFR --provider mock --format md
 
@@ -52,6 +63,22 @@ python -m app.main --analysts buffett --indicators US.FFR --provider mock \
 python -m app.main --analysts buffett --indicators US.FFR --provider mock --format json
 ```
 
+The per-agent layout produces:
+
+```
+out/run_<TS>/
+├── _summary.md              # H1 + meta block + persona×indicator table + file index
+├── buffett/
+│   ├── US.FFR.md
+│   └── US.UST10Y.md
+└── taleb/
+    └── US.FFR.md
+```
+
+The `_summary.md` table cells encode `<signal_direction> (<strength>)`; the file
+index uses relative links (`persona/indicator.md`) so they resolve inside the run
+dir.
+
 ### Running tests
 
 ```bash
@@ -60,7 +87,8 @@ pytest tests/
 ```
 
 The suite covers the catalog, persona registry, schema round-trip, mock-provider
-end-to-end, runner fan-out, markdown formatter, and the CLI (`--format md`).
+end-to-end, runner fan-out, markdown formatter, per-agent layout, default
+single-indicator behaviour, and the CLI (`--format {md,per-agent}`).
 
 ## What you get
 

@@ -5,7 +5,15 @@ from pathlib import Path
 
 from app.models import Assessment
 
-__all__ = ["render", "default_output_path", "PERSONA_NAMES"]
+__all__ = [
+    "render",
+    "render_per_agent",
+    "render_summary",
+    "default_output_path",
+    "default_run_dir",
+    "ensure_parent_dir",
+    "PERSONA_NAMES",
+]
 
 PERSONA_NAMES: dict[str, str] = {
     "buffett": "Warren E. Buffett",
@@ -138,8 +146,113 @@ def default_output_path() -> str:
     return f"./out/run_{ts}.md"
 
 
+def default_run_dir(run_id: str | None = None) -> str:
+    if run_id is None:
+        run_id = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    return f"./out/run_{run_id}"
+
+
 def ensure_parent_dir(path: str | Path) -> Path:
     p = Path(path)
     parent = p.parent if p.suffix else p
     parent.mkdir(parents=True, exist_ok=True)
     return p
+
+
+def _render_single(assessment: Assessment, meta: dict) -> str:
+    persona_name = PERSONA_NAMES.get(assessment.agent_id, assessment.agent_id.title())
+    indicator_name = assessment.indicator_id
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S UTC")
+    run_id = meta.get("run_id", "")
+    lines: list[str] = [
+        f"# {persona_name} on {indicator_name}",
+        "",
+        f"> Generated: {timestamp}",
+    ]
+    if run_id:
+        lines.append(f"> Run: `{run_id}`")
+    lines.append(f"> Target date: {assessment.target_date}")
+    lines.append(f"> Provider: {assessment.provider}")
+    lines.append("")
+    lines.append(
+        f"- **Signal:** {assessment.signal_direction} ({assessment.signal_strength:.2f})"
+    )
+    lines.append(f"- **Persona id:** `{assessment.agent_id}`")
+    lines.append("")
+    lines.append("### Diagnosis")
+    lines.append(assessment.diagnosis or "_empty_")
+    lines.append("")
+    lines.append("### Outlook")
+    lines.append(assessment.outlook or "_empty_")
+    lines.append("")
+    lines.append("### Key drivers")
+    if assessment.key_drivers:
+        for d in assessment.key_drivers:
+            lines.append(f"- {d}")
+    else:
+        lines.append("_empty_")
+    lines.append("")
+    lines.append("### News interpretation")
+    lines.append(assessment.news_interpretation or "_empty_")
+    lines.append("")
+    lines.append("### Reasoning trace")
+    lines.append(assessment.reasoning_trace or "_empty_")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def render_per_agent(
+    assessments: list[Assessment], meta: dict
+) -> dict[str, list[tuple[str, str]]]:
+    grouped: dict[str, list[Assessment]] = {}
+    for a in assessments:
+        grouped.setdefault(a.agent_id, []).append(a)
+    out: dict[str, list[tuple[str, str]]] = {}
+    for persona_id, group in sorted(grouped.items()):
+        items: list[tuple[str, str]] = []
+        for a in sorted(group, key=lambda x: x.indicator_id):
+            items.append((a.indicator_id, _render_single(a, meta)))
+        out[persona_id] = items
+    return out
+
+
+def render_summary(assessments: list[Assessment], meta: dict) -> str:
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S UTC")
+    lines: list[str] = [f"# Run summary — {timestamp}", ""]
+    for k in ("target_date", "provider", "analysts", "indicators"):
+        if k in meta:
+            v = meta[k]
+            if isinstance(v, list):
+                v = ", ".join(map(str, v))
+            lines.append(f"- **{k.replace('_', ' ').title()}:** {v}")
+    lines.append(f"- **Total assessments:** {len(assessments)}")
+    run_id = meta.get("run_id", "")
+    if run_id:
+        lines.append(f"- **Run id:** `{run_id}`")
+    lines.append("")
+    lines.append("## Table")
+    lines.append("")
+    personas = sorted({a.agent_id for a in assessments})
+    indicators = sorted({a.indicator_id for a in assessments})
+    lines.append("| Persona | " + " | ".join(indicators) + " |")
+    lines.append("|" + "|".join(["---"] * (len(indicators) + 1)) + "|")
+    by_persona_indicator = {(a.agent_id, a.indicator_id): a for a in assessments}
+    for pid in personas:
+        name = PERSONA_NAMES.get(pid, pid.title())
+        cells: list[str] = []
+        for ind in indicators:
+            a = by_persona_indicator.get((pid, ind))
+            if a:
+                cells.append(f"{a.signal_direction} ({a.signal_strength:.2f})")
+            else:
+                cells.append("—")
+        lines.append(f"| {name} ({pid}) | " + " | ".join(cells) + " |")
+    lines.append("")
+    lines.append("## Files")
+    lines.append("")
+    for pid in personas:
+        for ind in indicators:
+            if (pid, ind) in by_persona_indicator:
+                lines.append(f"- [{pid}/{ind}.md]({pid}/{ind}.md)")
+    lines.append("")
+    return "\n".join(lines)

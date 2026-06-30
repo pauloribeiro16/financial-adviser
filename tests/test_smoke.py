@@ -9,7 +9,7 @@ import pytest
 
 from app.agents import ALL_AGENTS
 from app.catalog import ALL_CATALOG
-from app.formatter import render
+from app.formatter import default_run_dir, render, render_per_agent, render_summary
 from app.models import Assessment
 from app.providers import MiniMaxProvider, ProviderRegistry
 from app.runner import run
@@ -187,3 +187,76 @@ def test_cli_exits_2_when_api_key_missing(tmp_path: Path) -> None:
     assert "MINIMAX_API_KEY" in result.stderr
     assert "mock" in result.stderr  # the hint
     assert not output.exists()  # no MD written when run fails
+
+
+def test_per_agent_layout(tmp_path: Path) -> None:
+    """render_per_agent + render_summary produce correct tree structure."""
+    a1 = Assessment(
+        agent_id="buffett", indicator_id="US.FFR", target_date=date(2025, 3, 31),
+        provider="minimax", diagnosis="d1", outlook="o1", key_drivers=["x", "y"],
+        news_interpretation="n1", reasoning_trace="r1",
+        signal_direction="BULLISH", signal_strength=0.42,
+    )
+    a2 = Assessment(
+        agent_id="buffett", indicator_id="US.UST10Y", target_date=date(2025, 3, 31),
+        provider="minimax", diagnosis="d2", outlook="o2", key_drivers=["z"],
+        news_interpretation="", reasoning_trace="",
+        signal_direction="BEARISH", signal_strength=0.7,
+    )
+    a3 = Assessment(
+        agent_id="taleb", indicator_id="US.FFR", target_date=date(2025, 3, 31),
+        provider="minimax", diagnosis="d3", outlook="o3", key_drivers=["a"],
+        news_interpretation="n3", reasoning_trace="r3",
+        signal_direction="NEUTRAL", signal_strength=0.55,
+    )
+    meta = {
+        "run_id": "run_test",
+        "target_date": "2025-03-31",
+        "provider": "minimax",
+        "analysts": ["buffett", "taleb"],
+        "indicators": ["US.FFR", "US.UST10Y"],
+        "completed_at": "2026-07-01",
+    }
+    tree = render_per_agent([a1, a2, a3], meta)
+    assert set(tree.keys()) == {"buffett", "taleb"}
+    assert len(tree["buffett"]) == 2
+    assert len(tree["taleb"]) == 1
+    indicator_id, md = tree["buffett"][0]
+    assert indicator_id in {"US.FFR", "US.UST10Y"}
+    assert "# Warren E. Buffett on" in md
+    assert "### Diagnosis" in md
+    assert "### Outlook" in md
+    assert "### Key drivers" in md
+    assert "### News interpretation" in md
+    assert "### Reasoning trace" in md
+    assert "BULLISH" in md or "BEARISH" in md
+    summary = render_summary([a1, a2, a3], meta)
+    assert "# Run summary" in summary
+    assert "| Persona |" in summary
+    assert "buffett/US.FFR.md" in summary
+    assert default_run_dir().startswith("./out/run_")
+
+
+def test_default_single_indicator(tmp_path: Path) -> None:
+    """Without --indicators, only US.UST10Y is assessed (default single)."""
+    env = {k: v for k, v in __import__("os").environ.items() if k != "MINIMAX_API_KEY"}
+    env["FA_SKIP_DOTENV"] = "1"
+    output_dir = tmp_path / "out"
+    result = subprocess.run(
+        [
+            sys.executable, "-m", "app.main",
+            "--analysts", "buffett",
+            "--provider", "mock",
+            "--format", "per-agent",
+            "--output", str(output_dir),
+            "--env", "development",
+        ],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(REPO_ROOT),
+    )
+    assert result.returncode == 0, f"stderr: {result.stderr}"
+    files = sorted(output_dir.rglob("*.md"))
+    paths = {p.relative_to(output_dir).as_posix() for p in files}
+    assert paths == {"_summary.md", "buffett/US.UST10Y.md"}, paths
