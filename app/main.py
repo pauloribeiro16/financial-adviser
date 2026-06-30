@@ -32,9 +32,9 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
-    setup_logging(service="mi")
     import os
     os.environ["MFL_ENV"] = args.env
+    setup_logging(service="mi")
 
     analysts = [a.strip() for a in args.analysts.split(",") if a.strip()]
     indicators = [i.strip() for i in args.indicators.split(",")] if args.indicators else None
