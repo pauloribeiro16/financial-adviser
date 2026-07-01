@@ -8,6 +8,79 @@ from app.pipeline import edgar, macro, market
 
 log = get_logger(__name__)
 
+MACRO_SERIES_FOR_COMPANY: dict[str, str] = {
+    "VIX (CBOE Volatility)": "VIXCLS",
+    "10Y Treasury Yield": "DGS10",
+    "IG-HY Credit Spread (OAS)": "BAMLH0A0HYM2",
+}
+
+_INCOME_KEYS = (
+    "Total Revenue",
+    "Operating Revenue",
+    "EBITDA",
+    "EBIT",
+    "Net Income From Continuing Operation Net Minority Interest",
+    "Reconciled Depreciation",
+    "Basic EPS",
+    "Diluted EPS",
+)
+_BALANCE_KEYS = (
+    "Total Assets",
+    "Total Liabilities Net Minority Interest",
+    "Stockholders Equity",
+    "Common Stock Equity",
+    "Cash And Cash Equivalents",
+    "Total Debt",
+    "Net Debt",
+    "Working Capital",
+)
+_CASHFLOW_KEYS = (
+    "Operating Cash Flow",
+    "Free Cash Flow",
+    "Capital Expenditure",
+    "Repurchase Of Capital Stock",
+    "Issuance Of Debt",
+    "Repayment Of Debt",
+    "End Cash Position",
+)
+
+
+def _fmt_billions(v: Any) -> str:
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return str(v)
+    a = abs(f)
+    if a >= 1e9:
+        return f"${f / 1e9:.2f}B"
+    if a >= 1e6:
+        return f"${f / 1e6:.1f}M"
+    if a >= 1e3:
+        return f"${f / 1e3:.1f}K"
+    return f"${f:.2f}"
+
+
+def _build_macro_for_company() -> dict[str, Any]:
+    indicators: list[dict[str, Any]] = []
+    for label, series_id in MACRO_SERIES_FOR_COMPANY.items():
+        try:
+            obs = macro.fetch_observation(series_id)
+            indicators.append({"label": label, **obs})
+        except Exception as e:
+            log.warning(
+                "pipeline.context.macro_fetch_failed",
+                series_id=series_id,
+                error=str(e),
+            )
+            indicators.append({
+                "label": label,
+                "series_id": series_id,
+                "latest_value": None,
+                "latest_date": None,
+                "observations": [],
+            })
+    return {"indicators": indicators}
+
 
 def build_company_context(ticker: str) -> dict[str, Any]:
     ticker = ticker.upper().strip()
@@ -16,12 +89,14 @@ def build_company_context(ticker: str) -> dict[str, Any]:
     edgar_packet = edgar.fetch_packet(ticker)
     quote = market.quote(ticker)
     fundamentals = market.fundamentals(ticker)
+    macro_ctx = _build_macro_for_company()
 
     return {
         "ticker": ticker,
         "edgar": edgar_packet,
         "quote": quote,
         "fundamentals": fundamentals,
+        "macro": macro_ctx,
     }
 
 
@@ -84,6 +159,39 @@ def _render_company(ctx: dict[str, Any]) -> str:
         for k, v in facts.items():
             sections.append(f"- **{k}** ({v.get('unit')}): {v.get('latest_value')} — period ending {v.get('latest_period_end')} (form {v.get('latest_form')})")
 
+    fundamentals = ctx.get("fundamentals") or {}
+    if fundamentals:
+        sections.append("\n## Income statement (yfinance, 4 periods)")
+        for row in fundamentals.get("income_stmt", []) or []:
+            period = row.get("period", "?")
+            lines = []
+            for k in _INCOME_KEYS:
+                v = row.get(k)
+                if v is not None:
+                    lines.append(f"    - {k}: {_fmt_billions(v)}")
+            if lines:
+                sections.append(f"- **{period}**\n" + "\n".join(lines))
+        sections.append("\n## Balance sheet (yfinance, 4 periods)")
+        for row in fundamentals.get("balance_sheet", []) or []:
+            period = row.get("period", "?")
+            lines = []
+            for k in _BALANCE_KEYS:
+                v = row.get(k)
+                if v is not None:
+                    lines.append(f"    - {k}: {_fmt_billions(v)}")
+            if lines:
+                sections.append(f"- **{period}**\n" + "\n".join(lines))
+        sections.append("\n## Cash flow (yfinance, 4 periods)")
+        for row in fundamentals.get("cashflow", []) or []:
+            period = row.get("period", "?")
+            lines = []
+            for k in _CASHFLOW_KEYS:
+                v = row.get(k)
+                if v is not None:
+                    lines.append(f"    - {k}: {_fmt_billions(v)}")
+            if lines:
+                sections.append(f"- **{period}**\n" + "\n".join(lines))
+
     if quote:
         sections.append("\n## Market quote (yfinance)")
         for k in ["price", "previous_close", "market_cap", "currency",
@@ -92,6 +200,17 @@ def _render_company(ctx: dict[str, Any]) -> str:
             v = quote.get(k)
             if v is not None:
                 sections.append(f"- {k}: {v}")
+
+    macro_ctx = ctx.get("macro") or {}
+    macro_indicators = macro_ctx.get("indicators") or []
+    if macro_indicators:
+        sections.append("\n## Macro context (FRED)")
+        for ind in macro_indicators:
+            label = ind.get("label") or ind.get("series_id", "?")
+            series_id = ind.get("series_id", "?")
+            v = ind.get("latest_value")
+            d = ind.get("latest_date") or "?"
+            sections.append(f"- {label} ({series_id}): {v} on {d}")
 
     return "\n".join(sections) + "\n"
 

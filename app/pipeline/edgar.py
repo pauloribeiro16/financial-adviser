@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from datetime import date, datetime, timedelta
 from typing import Any
 
 import httpx
@@ -12,6 +13,8 @@ log = get_logger(__name__)
 SEC_BASE = "https://data.sec.gov"
 SEC_ARCHIVES = "https://www.sec.gov/Archives/edgar/data"
 DEFAULT_TIMEOUT = 30.0
+
+_STALE_THRESHOLD_YEARS = 5
 
 _TICKERS_CACHE: dict[str, str] | None = None
 
@@ -135,6 +138,17 @@ def fetch_packet(ticker: str) -> dict[str, Any]:
     return payload
 
 
+def _is_stale(period_end: str | None) -> bool:
+    if not period_end:
+        return False
+    try:
+        d = datetime.strptime(period_end, "%Y-%m-%d").date()
+    except ValueError:
+        return False
+    cutoff = date.today() - timedelta(days=365 * _STALE_THRESHOLD_YEARS)
+    return d < cutoff
+
+
 def _summarize_facts(facts: dict[str, Any]) -> dict[str, Any]:
     us_gaap = facts.get("facts", {}).get("us-gaap", {}) or {}
     keys = ["Revenues", "RevenueFromContractWithCustomerExcludingAssessedTax",
@@ -153,6 +167,8 @@ def _summarize_facts(facts: dict[str, Any]) -> dict[str, Any]:
                 continue
             usd_series.sort(key=lambda s: s.get("end", ""), reverse=True)
             latest = usd_series[0]
+            if _is_stale(latest.get("end")):
+                continue
             summary[k] = {
                 "unit": unit_name,
                 "latest_value": latest.get("val"),
