@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from pathlib import Path
@@ -7,7 +8,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from app.agents import _HINTS, PROMPTS_DIR
+from app.agents import _HINTS, PROMPTS_DIR, _extract_content, _parse_json_or_default
 from app.logging import get_logger
 from app.models import (
     Consensus,
@@ -108,6 +109,7 @@ def build_verdict_messages(
     theses: list[Thesis],
     rebuttals: list[Rebuttal],
 ) -> list[dict[str, str]]:
+    counts = _tally(theses, rebuttals)
     system = (
         "You are the moderator of an investment debate. Your job is to read each persona's "
         "independent thesis AND their rebuttals to each other, then produce a single, fair, "
@@ -125,8 +127,21 @@ def build_verdict_messages(
         f"  revised verdict: {r.revised_verdict.value} (conv {r.revised_conviction:.2f})\n{r.reasoning}"
         for r in rebuttals
     ) or "_(no rebuttals — single-round debate)_"
+    tally_block = (
+        "## Position tally (pre-computed)\n"
+        f"- bull: {counts['bull']}\n"
+        f"- bear: {counts['bear']}\n"
+        f"- neutral: {counts['neutral']}\n"
+        f"- avg_conviction: {counts['avg_conviction']:.2f}\n"
+        f"- suggested_consensus: {counts['consensus'].value}\n\n"
+        "Your task: read the data, the theses, and the rebuttals below, then produce\n"
+        "a structured verdict. The TALLY ABOVE is the ground truth — do not recount.\n"
+        "Focus on the qualitative synthesis: points_of_agreement, points_of_disagreement,\n"
+        "final_call, summary, confidence.\n\n"
+    )
     user = (
-        f"# Debate summary\n"
+        tally_block
+        + f"# Debate summary\n"
         f"- Target: {target}\n"
         f"- Domain: {domain}\n"
         f"- Target date: {target_date.isoformat()}\n\n"
@@ -134,8 +149,7 @@ def build_verdict_messages(
         f"# Round 0 theses\n{theses_block}\n\n"
         f"# Rebuttals\n{rebuttals_block}\n\n"
         "Produce a single structured verdict capturing the debate's net conclusion. "
-        "Consensus should be BULLISH/BEARISH only when ≥75% of personas agree; SPLIT_BULL/SPLIT_BEAR for partial; "
-        "NEUTRAL when mixed. Points of agreement must be claims shared by 2+ personas."
+        "Points of agreement must be claims shared by 2+ personas."
     )
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]
 
@@ -336,20 +350,111 @@ def _run_synthesis(
     callback: Any | None = None,
 ) -> Verdict:
     msgs = build_verdict_messages(target, domain, target_date, context_md, theses, rebuttals)
+    counts = _tally(theses, rebuttals)
+    v = _synthesize_via_structured(provider, msgs, counts, callback)
+    if v is not None:
+        v.target = target
+        v.domain = Domain(domain)
+        return v
+    v = _synthesize_via_plain_invoke(provider, msgs, counts, callback, target, domain)
+    if v is not None:
+        return v
+    log.warning("debate.synthesis_falling_back_heuristic", error="both structured and plain invoke failed")
+    return _heuristic_verdict(target, domain, theses, rebuttals)
+
+
+def _synthesize_via_structured(
+    provider: LLMProvider,
+    msgs: list[dict[str, str]],
+    counts: dict[str, Any],
+    callback: Any | None,
+) -> Verdict | None:
     try:
         v = _invoke_structured(provider, Verdict, msgs, None, callback)
     except Exception as e:
-        log.warning("debate.synthesis_falling_back_heuristic", error=str(e))
-        v = _heuristic_verdict(target, domain, theses, rebuttals)
-    v.target = target
-    v.domain = Domain(domain)
+        log.warning("debate.synthesis_structured_failed_falling_back", error=str(e))
+        return None
+    v.consensus = counts["consensus"]
+    v.bull_count = counts["bull"]
+    v.bear_count = counts["bear"]
+    v.neutral_count = counts["neutral"]
+    v.avg_conviction = counts["avg_conviction"]
     return v
+
+
+def _synthesize_via_plain_invoke(
+    provider: LLMProvider,
+    msgs: list[dict[str, str]],
+    counts: dict[str, Any],
+    callback: Any | None,
+    target: str,
+    domain: str,
+) -> Verdict | None:
+    model = provider.get_model()
+    cfg: dict[str, Any] = {}
+    if callback is not None:
+        cfg["callbacks"] = [callback]
+    try:
+        response = model.invoke(msgs, config=cfg or None)
+    except Exception as e:
+        log.warning("debate.synthesis_plain_invoke_failed", error=str(e))
+        return None
+    d = _parse_json_or_default(_extract_content(response))
+    d["target"] = target
+    d["domain"] = domain
+    d["consensus"] = counts["consensus"]
+    d["bull_count"] = counts["bull"]
+    d["bear_count"] = counts["bear"]
+    d["neutral_count"] = counts["neutral"]
+    d["avg_conviction"] = counts["avg_conviction"]
+    try:
+        return Verdict(**d)
+    except Exception as e:
+        log.warning("debate.synthesis_verdict_build_failed", error=str(e))
+        return None
+
+
+def _tally(theses: list[Thesis], rebuttals: list[Rebuttal]) -> dict[str, Any]:
+    last_rebuttals: dict[str, Rebuttal] = {}
+    for r in rebuttals:
+        prev = last_rebuttals.get(r.agent_id)
+        if prev is None or r.round > prev.round:
+            last_rebuttals[r.agent_id] = r
+    finals: list[tuple[Direction, float]] = []
+    for t in theses:
+        rb = last_rebuttals.get(t.agent_id)
+        if rb is not None:
+            finals.append((rb.revised_verdict, rb.revised_conviction))
+        else:
+            finals.append((t.verdict, t.conviction))
+    counts = Counter(d for d, _ in finals)
+    bull = counts.get(Direction.BULLISH, 0)
+    bear = counts.get(Direction.BEARISH, 0)
+    neu = counts.get(Direction.NEUTRAL, 0)
+    total = max(1, len(finals))
+    avg = sum(c for _, c in finals) / total
+    if bull >= 0.75 * total:
+        cons = Consensus.BULLISH
+    elif bear >= 0.75 * total:
+        cons = Consensus.BEARISH
+    elif bull > bear and bull > neu:
+        cons = Consensus.SPLIT_BULL
+    elif bear > bull and bear > neu:
+        cons = Consensus.SPLIT_BEAR
+    else:
+        cons = Consensus.NEUTRAL
+    return {
+        "bull": bull,
+        "bear": bear,
+        "neutral": neu,
+        "avg_conviction": avg,
+        "consensus": cons,
+    }
 
 
 def _heuristic_verdict(
     target: str, domain: str, theses: list[Thesis], rebuttals: list[Rebuttal]
 ) -> Verdict:
-    from collections import Counter
     finals = [t for t in theses]
     finals.extend(
         Thesis(
