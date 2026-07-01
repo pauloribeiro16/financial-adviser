@@ -28,8 +28,8 @@ The CLI auto-loads `./.env` via python-dotenv (when installed). To skip .env
 loading (e.g. in tests), set `FA_SKIP_DOTENV=1` in the environment.
 ```
 
-`--provider mock` runs offline with placeholder output — perfect for tests and CI.
-`--provider minimax` calls the real Anthropic-compatible API.
+`--provider mock` is the default and runs offline with placeholder output — perfect for tests and CI.
+`--provider minimax` calls the real Anthropic-compatible API and requires `MINIMAX_API_KEY` in env.
 
 ### Output formats
 

@@ -37,7 +37,8 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                    help="Comma-separated persona IDs (default: buffett,burry,greenspan,volcker,dimon)")
     p.add_argument("--indicators", default=None,
                    help="Comma-separated indicator IDs (default: single US.UST10Y)")
-    p.add_argument("--provider", default="minimax", choices=["minimax", "mock"])
+    p.add_argument("--provider", default="mock", choices=["mock", "minimax"],
+                   help="LLM provider: 'mock' (offline, no API key) or 'minimax' (real Anthropic-compatible API). Default: mock.")
     p.add_argument("--date", default=None,
                    help="Target date YYYY-MM-DD (default: today)")
     p.add_argument("--target-date", dest="target_date", default=None,
@@ -85,7 +86,7 @@ def main(argv: list[str] | None = None) -> int:
         )
     except RuntimeError as e:
         print(f"\nERROR: {e}", file=sys.stderr)
-        print("Hint: did you forget to set MINIMAX_API_KEY? Try `--provider mock` for offline mode.", file=sys.stderr)
+        print("Hint: you passed --provider minimax; either set MINIMAX_API_KEY in the environment, or drop --provider to use the offline 'mock' default.", file=sys.stderr)
         return 2
 
     run_id = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
