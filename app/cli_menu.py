@@ -2,20 +2,22 @@
 
 Single entry point: ``interactive_pick(defaults) -> dict``.
 
-The flow:
+The flow is entirely arrow-key driven — no free-text input. Every choice
+is a ``beaupy.select`` (single) or ``beaupy.select_multiple``:
+
     1.  A ``rich`` welcome panel describing what the tool does.
     2.  Domain (company / macro).
-    3.  Target (ticker or comma-separated indicators).
+    3.  Target (ticker from a popular list OR indicators from the FRED catalog).
     4.  Provider (mock / minimax).
     5.  Personas (multi-select with display names).
-    6.  Rounds (validated number 1-10).
+    6.  Rounds (1..10, single select).
     7.  Output format.
     8.  Synthesis (yes / no).
-    9.  Confirmation summary; user can confirm or restart.
+    9.  Confirmation summary; user can confirm or abort.
 
 If stdout is not a TTY (or beaupy raises for any reason), the function
-returns the caller-provided ``defaults`` unchanged so the CLI keeps working
-in scripts and CI.
+returns the caller-provided ``defaults`` unchanged so the CLI keeps
+working in scripts and CI.
 """
 
 from __future__ import annotations
@@ -29,6 +31,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from app.agents import _PERSONA_DEFS, ALL_AGENTS
+from app.catalog import get_catalog
 from app.logging import get_logger
 
 log = get_logger(__name__)
@@ -37,6 +40,21 @@ DEFAULT_COMPANY_ANALYSTS: list[str] = ["buffett", "lynch", "burry", "taleb"]
 DEFAULT_MACRO_ANALYSTS: list[str] = ["dalio", "gundlach", "volcker", "greenspan"]
 DEFAULT_INDICATORS: list[str] = ["US.FFR", "US.CPI.YOY"]
 FORMATS: list[str] = ["debate", "md", "json", "per-agent"]
+
+POPULAR_TICKERS: list[tuple[str, str]] = [
+    ("AAPL",  "Apple"),
+    ("MSFT",  "Microsoft"),
+    ("NVDA",  "NVIDIA"),
+    ("GOOGL", "Alphabet"),
+    ("AMZN",  "Amazon"),
+    ("META",  "Meta Platforms"),
+    ("TSLA",  "Tesla"),
+    ("BRK-B", "Berkshire Hathaway B"),
+    ("JPM",   "JPMorgan Chase"),
+    ("V",     "Visa"),
+    ("WMT",   "Walmart"),
+    ("JNJ",   "Johnson & Johnson"),
+]
 
 _PERSONA_NAMES: dict[str, str] = {pid: name for pid, name, *_ in _PERSONA_DEFS}
 _PERSONA_SCHOOL: dict[str, str] = {pid: school for pid, _, school, _ in _PERSONA_DEFS}
@@ -90,15 +108,20 @@ def _persona_label(pid: str) -> str:
     return f"{name}  ({school})" if school else name
 
 
-def _validate_rounds(s: str) -> bool:
-    try:
-        n = int(s)
-    except (TypeError, ValueError):
-        return False
-    return 1 <= n <= 10
+def _ticker_options() -> tuple[list[str], int]:
+    labels = [f"{sym}  ({name})" for sym, name in POPULAR_TICKERS]
+    return labels, 0
 
 
-def _persona_options(selected_default: list[str]) -> tuple[list[Any], list[int]]:
+def _indicator_options() -> tuple[list[str], list[str], list[int]]:
+    """Return (labels, ids, pre-ticked indices) from the FRED catalog."""
+    catalog = get_catalog()
+    labels = [f"{i.indicator_id}  —  {i.name}  [dim]({i.category.value.lower()})[/]" for i in catalog]
+    ids = [i.indicator_id for i in catalog]
+    return labels, ids, []
+
+
+def _persona_options(selected_default: list[str]) -> tuple[list[str], list[int]]:
     pids = sorted(ALL_AGENTS.keys())
     labels = [_persona_label(p) for p in pids]
     ticked = [i for i, p in enumerate(pids) if p in selected_default]
@@ -129,6 +152,7 @@ def _render_summary(console: Console, cfg: dict[str, Any]) -> None:
 def interactive_pick(defaults: dict[str, Any]) -> dict[str, Any]:
     """Run an interactive beaupy menu and return the chosen options.
 
+    All choices are arrow-key based; there is no free-text input anywhere.
     Required keys in ``defaults`` (all consumed with sensible fallbacks):
         - domain: 'company' | 'macro'
         - target: str (ticker for company; first indicator for macro)
@@ -161,21 +185,44 @@ def interactive_pick(defaults: dict[str, Any]) -> dict[str, Any]:
     domain = "company" if picked_idx == 0 else "macro"
 
     if domain == "company":
-        default_target = str(defaults.get("target") or "AAPL")
-        ticker_raw = _safe(
-            lambda: beaupy.prompt("Ticker (e.g. AAPL, MSFT, NVDA)", initial_value=default_target),
-            default_target,
+        ticker_labels, _ = _ticker_options()
+        default_target = str(defaults.get("target") or "AAPL").upper()
+        ticker_idx = next(
+            (i for i, (sym, _) in enumerate(POPULAR_TICKERS) if sym == default_target),
+            0,
         )
-        ticker = str(ticker_raw).upper().strip() or "AAPL"
+        picked_idx = _safe(
+            lambda: beaupy.select(
+                ticker_labels,
+                cursor=">",
+                cursor_index=ticker_idx,
+                pagination=True,
+                page_size=12,
+                return_index=True,
+            ),
+            ticker_idx,
+        )
+        ticker = POPULAR_TICKERS[picked_idx][0]
         target = ticker
         indicators: list[str] = []
     else:
+        indicator_labels, indicator_ids, _ = _indicator_options()
         default_indicators = list(defaults.get("indicators") or DEFAULT_INDICATORS)
-        ind_raw = _safe(
-            lambda: beaupy.prompt("Indicators (comma-separated)", initial_value=",".join(default_indicators)),
-            ",".join(default_indicators),
+        ticked_idx = [
+            i for i, iid in enumerate(indicator_ids) if iid in default_indicators
+        ] or [0, 1]
+        picked_indices = _safe(
+            lambda: beaupy.select_multiple(
+                indicator_labels,
+                ticked_indices=ticked_idx,
+                minimal_count=1,
+                pagination=True,
+                page_size=8,
+                return_indices=True,
+            ),
+            ticked_idx,
         )
-        indicators = [s.strip() for s in str(ind_raw).split(",") if s.strip()] or list(default_indicators)
+        indicators = [indicator_ids[i] for i in picked_indices] if picked_indices else list(default_indicators)
         target = indicators[0]
 
     provider_options = [
@@ -210,19 +257,20 @@ def interactive_pick(defaults: dict[str, Any]) -> dict[str, Any]:
     else:
         analysts = DEFAULT_COMPANY_ANALYSTS if domain == "company" else DEFAULT_MACRO_ANALYSTS
 
+    rounds_options = [str(n) for n in range(1, 11)]
     default_rounds = int(defaults.get("rounds", 2))
-    rounds_raw = _safe(
-        lambda: beaupy.prompt(
-            "Rounds (1-10)",
-            validator=_validate_rounds,
-            initial_value=str(default_rounds),
+    rounds_idx = max(0, min(9, default_rounds - 1))
+    picked_idx = _safe(
+        lambda: beaupy.select(
+            rounds_options,
+            cursor=">",
+            cursor_index=rounds_idx,
+            pagination=False,
+            return_index=True,
         ),
-        str(default_rounds),
+        rounds_idx,
     )
-    try:
-        rounds = int(rounds_raw)
-    except (TypeError, ValueError):
-        rounds = default_rounds
+    rounds = picked_idx + 1
 
     format_options = [
         "debate      (Markdown, round-by-round + synthesis)",
