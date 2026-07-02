@@ -29,6 +29,15 @@ def _read(path: str) -> str:
     return p.read_text(encoding="utf-8") if p.exists() else ""
 
 
+_SHARED_PILLARS_PATH = PROMPTS_DIR / "_shared" / "analysis_pillars.md"
+
+
+def _shared_pillars_text() -> str:
+    if _SHARED_PILLARS_PATH.exists():
+        return _read(_SHARED_PILLARS_PATH)
+    return ""
+
+
 def persona_system_prompt(persona_id: str, target_kind: str) -> str:
     pdir = PROMPTS_DIR / persona_id
     refs_dir = pdir / "references"
@@ -39,6 +48,9 @@ def persona_system_prompt(persona_id: str, target_kind: str) -> str:
             if txt:
                 parts.append(txt)
     parts.append(_read(pdir / "indicators" / "_index.md"))
+    shared = _shared_pillars_text()
+    if shared:
+        parts.append(shared)
     return "\n\n---\n\n".join(p for p in parts if p)
 
 
@@ -62,11 +74,28 @@ def build_thesis_messages(
         "# Your task\n"
         "Read the data above and produce an initial investment thesis for this target. "
         "You are NOT seeing any other persona's view yet — this is your independent first take.\n\n"
+        "# Mandatory analysis structure\n\n"
+        "You MUST walk through these 6 pillars in your `reasoning` field, "
+        "citing specific data points from the context (derived metrics, "
+        "news, 8-K events, or 10-K facts). Each pillar needs evidence — "
+        "vague claims are rejected:\n\n"
+        "1. **Business Lifecycle** (Hyper-Growth / Operating Leverage / Capital Return / Decline)\n"
+        "2. **Moat Analysis** (5 types: Network Effects, Switching Costs, Intangibles, Cost Advantage, Counter-Positioning)\n"
+        "3. **Growth Engines** (New Customers, Pricing Power, New Products, Margin Expansion)\n"
+        "4. **Financial Health Check** (cite the Derived metrics table)\n"
+        "5. **Bear Case** (grounded in news + 8-K events, not generic fears)\n"
+        "6. **Valuation Dashboard** (P/E, P/FCF, EV/EBITDA)\n\n"
+        "Write `reasoning` as a long, structured Markdown analysis "
+        "(800-1500 words) with the 6 sections as headers. End with "
+        "verdict + conviction.\n\n"
+        "Format rules: return targets/concessions/disagreements as FLAT JSON arrays "
+        "of plain strings (e.g. [\"point 1\", \"point 2\"]). Do NOT nest arrays "
+        "and do NOT wrap each item in XML tags such as <item>...</item>.\n\n"
         "Submit a single structured thesis with:\n"
         "- verdict: BULLISH | BEARISH | NEUTRAL\n"
         "- conviction: float 0.0-1.0\n"
         "- key_drivers: 3-5 bullets (each citing a data point above)\n"
-        "- reasoning: 1-2 paragraphs explaining your verdict from your persona's worldview\n"
+        "- reasoning: structured Markdown walking the 6 pillars (see above)\n"
         "- data_used: which data points from the context you leaned on\n"
     )
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]
@@ -90,16 +119,19 @@ def build_rebuttal_messages(
         f"# Data context for {target}\n\n{context_md}\n\n"
         f"# Other personas' theses (round {prior_theses[0].round})\n\n{other}\n\n"
         "# Your task\n"
-        "Read the OTHER personas' theses carefully. Then produce a rebuttal:\n"
-        "- targets: agent_ids of the personas you are responding to (your targets of agreement/disagreement)\n"
-        "- concessions: 1-3 points where you concede to another persona\n"
-        "- disagreements: 1-3 points where you push back, citing your persona's framework\n"
-        "- revised_verdict: BULLISH | BEARISH | NEUTRAL (you may keep or change)\n"
-        "- revised_conviction: float 0.0-1.0 (may go up or down)\n"
-        "- reasoning: 1-2 paragraphs explaining your updated position\n\n"
-        "Format rules: return targets/concessions/disagreements as FLAT JSON arrays "
-        "of plain strings (e.g. [\"point 1\", \"point 2\"]). Do NOT nest arrays "
-        "and do NOT wrap each item in XML tags such as <item>...</item>."
+        "Read each persona's structured analysis. For each, identify the "
+        "WEAKEST pillar claim — the one with the weakest data citation. "
+        "Produce a rebuttal that:\n"
+        "- `targets`: agent_ids you are responding to\n"
+        "- `concessions`: 1-3 points where their data-backed reasoning is "
+        "  correct (cite which pillar + which data point)\n"
+        "- `disagreements`: 1-3 points where their pillar analysis fails "
+        "  (cite a counter-data point from the context)\n"
+        "- `revised_verdict` / `revised_conviction`: updated view\n"
+        "- `reasoning`: structured markdown walking through how the "
+        "  specific 6 pillars shifted your view\n\n"
+        "Format: flat JSON arrays of plain strings for "
+        "targets/concessions/disagreements. No nested arrays, no XML tags."
     )
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]
 
