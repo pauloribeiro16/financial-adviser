@@ -4,7 +4,7 @@ from typing import Any
 
 from app.catalog import get_catalog
 from app.logging import get_logger
-from app.pipeline import edgar, macro, market
+from app.pipeline import edgar, macro, market, news
 
 log = get_logger(__name__)
 
@@ -91,12 +91,18 @@ def build_company_context(ticker: str) -> dict[str, Any]:
     fundamentals = market.fundamentals(ticker)
     macro_ctx = _build_macro_for_company()
 
+    news_items = news.fetch_recent_news(ticker)
+    cik = (edgar_packet or {}).get("cik")
+    events = news.fetch_material_events(cik, ticker=ticker) if cik else []
+
     return {
         "ticker": ticker,
         "edgar": edgar_packet,
         "quote": quote,
         "fundamentals": fundamentals,
         "macro": macro_ctx,
+        "news": news_items,
+        "material_events": events,
     }
 
 
@@ -211,6 +217,44 @@ def _render_company(ctx: dict[str, Any]) -> str:
             v = ind.get("latest_value")
             d = ind.get("latest_date") or "?"
             sections.append(f"- {label} ({series_id}): {v} on {d}")
+
+    news_items = ctx.get("news") or []
+    if news_items:
+        sections.append("\n## Recent news (yfinance)")
+        for item in news_items:
+            date = (item.get("date") or "").strip() or "?"
+            title = (item.get("title") or "").strip() or "(untitled)"
+            pub = (item.get("publisher") or "").strip()
+            link = (item.get("link") or "").strip()
+            related = item.get("related_tickers") or []
+            tail = f"  _(related: {', '.join(related)})_" if related else ""
+            if pub and link:
+                line = f"- **{date}** — {title} — [{pub}]({link}){tail}"
+            elif pub:
+                line = f"- **{date}** — {title} — {pub}{tail}"
+            else:
+                line = f"- **{date}** — {title}{tail}"
+            sections.append(line)
+
+    events = ctx.get("material_events") or []
+    if events:
+        cik = (edgar or {}).get("cik") or ""
+        sections.append("\n## Material events (SEC 8-K)")
+        for ev in events:
+            date = (ev.get("date") or "").strip() or "?"
+            acc = (ev.get("accession") or "").strip()
+            code = (ev.get("items") or "").strip() or "n/a"
+            doc = (ev.get("primary_document") or "").strip()
+            if acc and cik:
+                acc_clean = acc.replace("-", "")
+                filing_url = (
+                    f"https://www.sec.gov/Archives/edgar/data/"
+                    f"{int(cik)}/{acc_clean}/{doc or ''}"
+                )
+                acc_label = f"[{acc}]({filing_url})"
+            else:
+                acc_label = acc or "?"
+            sections.append(f"- **{date}** — 8-K (items: {code}) — accession {acc_label}")
 
     return "\n".join(sections) + "\n"
 
