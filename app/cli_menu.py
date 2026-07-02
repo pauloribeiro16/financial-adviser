@@ -41,6 +41,13 @@ DEFAULT_MACRO_ANALYSTS: list[str] = ["dalio", "gundlach", "volcker", "greenspan"
 DEFAULT_INDICATORS: list[str] = ["US.FFR", "US.CPI.YOY"]
 FORMATS: list[str] = ["debate", "md", "json", "per-agent"]
 
+SECTOR_DEFAULT_ANALYSTS: dict[str, list[str]] = {
+    "Financial Services": ["buffett", "lynch", "burry", "dimon"],
+    "Technology":        ["buffett", "lynch", "wood", "taleb"],
+    "Healthcare":        ["buffett", "lynch", "grantham", "taleb"],
+    "Energy":            ["buffett", "dalio", "eisman", "taleb"],
+}
+
 SECTOR_TICKERS: dict[str, list[tuple[str, str]]] = {
     "Financial Services": [
         ("JPM",  "JPMorgan Chase"),
@@ -295,8 +302,14 @@ def interactive_pick(defaults: dict[str, Any]) -> dict[str, Any]:
         domain,
         selected_sector if domain == "company" else None,
     )
+    sector_default = (
+        SECTOR_DEFAULT_ANALYSTS.get(selected_sector, [])
+        if domain == "company" and selected_sector
+        else []
+    )
     default_analysts = list(
         defaults.get("analysts")
+        or sector_default
         or (DEFAULT_COMPANY_ANALYSTS if domain == "company" else DEFAULT_MACRO_ANALYSTS)
     )
     filtered_default = [p for p in default_analysts if p in available_pids]
