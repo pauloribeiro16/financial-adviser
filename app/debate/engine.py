@@ -96,7 +96,10 @@ def build_rebuttal_messages(
         "- disagreements: 1-3 points where you push back, citing your persona's framework\n"
         "- revised_verdict: BULLISH | BEARISH | NEUTRAL (you may keep or change)\n"
         "- revised_conviction: float 0.0-1.0 (may go up or down)\n"
-        "- reasoning: 1-2 paragraphs explaining your updated position\n"
+        "- reasoning: 1-2 paragraphs explaining your updated position\n\n"
+        "Format rules: return targets/concessions/disagreements as FLAT JSON arrays "
+        "of plain strings (e.g. [\"point 1\", \"point 2\"]). Do NOT nest arrays "
+        "and do NOT wrap each item in XML tags such as <item>...</item>."
     )
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]
 

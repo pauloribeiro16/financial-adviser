@@ -1,10 +1,48 @@
 from __future__ import annotations
 
+import re
 from datetime import date
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+_XML_TAG_RE = re.compile(r"<[^>]+>")
+
+
+def _coerce_str_list(v: Any) -> list[str]:
+    """Coerce any nested structure into a flat list of plain strings.
+
+    Designed to absorb structured-output quirks where the LLM returns a
+    ``list[list[str]]`` (each item wrapped in its own list) or wraps each
+    string in XML-ish tags such as ``<item>...</item>``.
+
+    Behaviour:
+        - ``None`` -> ``[]``
+        - scalars (str/int/float/bool) -> stripped XML-stripped str
+        - list/tuple/set -> recursively flattened
+        - elements that are neither list nor str are stringified
+        - empty / whitespace-only strings are dropped
+    """
+    if v is None:
+        return []
+    out: list[str] = []
+
+    def _flatten(x: Any) -> None:
+        if isinstance(x, str):
+            cleaned = _XML_TAG_RE.sub("", x).strip()
+            if cleaned:
+                out.append(cleaned)
+        elif isinstance(x, (list, tuple, set)):
+            for item in x:
+                _flatten(item)
+        else:
+            cleaned = _XML_TAG_RE.sub("", str(x)).strip()
+            if cleaned:
+                out.append(cleaned)
+
+    _flatten(v)
+    return out
 
 
 class Bloc(StrEnum):
@@ -80,6 +118,11 @@ class Assessment(BaseModel):
     signal_direction: str
     signal_strength: float = Field(ge=0.0, le=1.0)
 
+    @field_validator("key_drivers", mode="before")
+    @classmethod
+    def _coerce_lists(cls, v: Any) -> list[str]:
+        return _coerce_str_list(v)
+
 
 class AgentProfile(BaseModel):
     id: str
@@ -99,6 +142,11 @@ class Thesis(BaseModel):
     reasoning: str
     data_used: list[str] = Field(default_factory=list)
 
+    @field_validator("key_drivers", "data_used", mode="before")
+    @classmethod
+    def _coerce_lists(cls, v: Any) -> list[str]:
+        return _coerce_str_list(v)
+
 
 class Rebuttal(BaseModel):
     agent_id: str
@@ -111,6 +159,11 @@ class Rebuttal(BaseModel):
     revised_verdict: Direction
     revised_conviction: float = Field(ge=0.0, le=1.0)
     reasoning: str
+
+    @field_validator("targets", "concessions", "disagreements", mode="before")
+    @classmethod
+    def _coerce_lists(cls, v: Any) -> list[str]:
+        return _coerce_str_list(v)
 
 
 class Verdict(BaseModel):
@@ -127,6 +180,11 @@ class Verdict(BaseModel):
     confidence: float = Field(ge=0.0, le=1.0)
     summary: str
 
+    @field_validator("points_of_agreement", "points_of_disagreement", mode="before")
+    @classmethod
+    def _coerce_lists(cls, v: Any) -> list[str]:
+        return _coerce_str_list(v)
+
 
 class DebateResult(BaseModel):
     run_id: str
@@ -140,3 +198,8 @@ class DebateResult(BaseModel):
     rebuttals: list[Rebuttal] = Field(default_factory=list)
     verdict: Verdict | None = None
     created_at: str
+
+    @field_validator("analysts", mode="before")
+    @classmethod
+    def _coerce_lists(cls, v: Any) -> list[str]:
+        return _coerce_str_list(v)
