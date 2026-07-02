@@ -157,6 +157,34 @@ def build_verdict_messages(
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]
 
 
+_SCHEMA_DEFAULTS: dict[str, dict[str, Any]] = {
+    "Thesis": {
+        "agent_id": "[unavailable]",
+        "target": "[unavailable]",
+        "domain": "company",
+        "round": 0,
+        "verdict": "NEUTRAL",
+        "conviction": 0.5,
+        "reasoning": "[unavailable]",
+        "key_drivers": [],
+        "data_used": [],
+    },
+    "Rebuttal": {
+        "agent_id": "[unavailable]",
+        "target": "[unavailable]",
+        "domain": "company",
+        "round": 1,
+        "revised_verdict": "NEUTRAL",
+        "revised_conviction": 0.5,
+        "reasoning": "[unavailable]",
+        "targets": [],
+        "concessions": [],
+        "disagreements": [],
+    },
+    "Verdict": {},
+}
+
+
 def _invoke_structured(
     provider: LLMProvider,
     schema: type[BaseModel],
@@ -172,6 +200,97 @@ def _invoke_structured(
     if cfg is not None:
         return structured.invoke(messages, config=cfg)
     return structured.invoke(messages)
+
+
+def _invoke_with_fallback(
+    provider: LLMProvider,
+    schema: type[BaseModel],
+    messages: list[dict[str, str]],
+    callback: Any | None = None,
+    counts: dict[str, Any] | None = None,
+    target: str = "",
+    domain: str = "",
+) -> BaseModel | None:
+    schema_name = schema.__name__
+    defaults = _SCHEMA_DEFAULTS.get(schema_name, {})
+
+    cfg: dict[str, Any] = {}
+    if callback is not None:
+        cfg["callbacks"] = [callback]
+
+    model = provider.get_model()
+
+    try:
+        s = model.with_structured_output(schema, include_raw=True)
+        res = s.invoke(messages, config=cfg or None)
+        if isinstance(res, dict):
+            parsed = res.get("parsed")
+            if parsed is not None:
+                log.debug("debate.invoke.fallback_used", level=1, schema=schema_name)
+                return parsed
+            err = res.get("parsing_error")
+            if err is not None:
+                log.warning("debate.invoke.l1_parsing_error", schema=schema_name, error=str(err)[:200])
+        elif isinstance(res, BaseModel):
+            log.debug("debate.invoke.fallback_used", level=1, schema=schema_name)
+            return res
+    except TypeError:
+        try:
+            s = model.with_structured_output(schema)
+            res = s.invoke(messages, config=cfg or None)
+            if isinstance(res, BaseModel):
+                log.debug("debate.invoke.fallback_used", level=1, schema=schema_name)
+                return res
+            if isinstance(res, dict) and isinstance(res.get("parsed"), BaseModel):
+                return res["parsed"]
+        except Exception as e:
+            log.warning("debate.invoke.l1_failed", schema=schema_name, error=str(e)[:200])
+    except Exception as e:
+        log.warning("debate.invoke.l1_failed", schema=schema_name, error=str(e)[:200])
+
+    try:
+        response = model.invoke(messages, config=cfg or None)
+        content = _extract_content(response)
+        d = _parse_json_or_default(content)
+        for k, v in defaults.items():
+            d.setdefault(k, v)
+        if schema_name == "Verdict":
+            d.setdefault("target", target)
+            d.setdefault("domain", domain)
+            if counts is not None:
+                d.setdefault("consensus", counts.get("consensus", "NEUTRAL"))
+                d.setdefault("bull_count", counts.get("bull", 0))
+                d.setdefault("bear_count", counts.get("bear", 0))
+                d.setdefault("neutral_count", counts.get("neutral", 0))
+                d.setdefault("avg_conviction", counts.get("avg_conviction", 0.5))
+            else:
+                d.setdefault("consensus", "NEUTRAL")
+                d.setdefault("bull_count", 0)
+                d.setdefault("bear_count", 0)
+                d.setdefault("neutral_count", 0)
+                d.setdefault("avg_conviction", 0.5)
+            d.setdefault("final_call", "[unavailable]")
+            d.setdefault("confidence", 0.5)
+            d.setdefault("summary", "[unavailable]")
+            d.setdefault("points_of_agreement", [])
+            d.setdefault("points_of_disagreement", [])
+        instance = schema(**d)
+        log.warning("debate.invoke.fallback_used", level=2, schema=schema_name)
+        return instance
+    except Exception as e:
+        log.warning("debate.invoke.l2_failed", schema=schema_name, error=str(e)[:200])
+
+    if schema_name == "Verdict" and counts is not None:
+        log.warning("debate.invoke.fallback_used", level=3, schema="Verdict")
+        return _heuristic_verdict(target, domain, [], [])
+
+    try:
+        instance = schema(**defaults)
+        log.warning("debate.invoke.fallback_used", level=3, schema=schema_name)
+        return instance
+    except Exception as e:
+        log.error("debate.invoke.l3_failed", schema=schema_name, error=str(e)[:200])
+        return None
 
 
 def run_debate(
@@ -277,11 +396,10 @@ def _run_round_theses(
     with ThreadPoolExecutor(max_workers=max(1, len(analysts))) as ex:
         futures = {
             ex.submit(
-                _invoke_structured,
+                _invoke_with_fallback,
                 provider,
                 Thesis,
                 build_thesis_messages(a, target, domain, target_date, context_md),
-                None,
                 callback,
             ): a
             for a in analysts
@@ -289,14 +407,15 @@ def _run_round_theses(
         for fut, agent_id in futures.items():
             try:
                 t = fut.result()
-                if isinstance(t, Thesis):
-                    t.agent_id = agent_id
-                    t.target = target
-                    t.domain = Domain(domain)
-                    t.round = 0
-                    out.append(t)
             except Exception as e:
-                log.error("debate.thesis_failed", agent=agent_id, error=str(e))
+                log.error("debate.thesis_dropped_unexpected", agent=agent_id, error=str(e))
+                continue
+            if isinstance(t, Thesis):
+                t.agent_id = agent_id
+                t.target = target
+                t.domain = Domain(domain)
+                t.round = 0
+                out.append(t)
     return out
 
 
@@ -316,13 +435,12 @@ def _run_round_rebuttals(
     with ThreadPoolExecutor(max_workers=max(1, len(analysts))) as ex:
         futures = {
             ex.submit(
-                _invoke_structured,
+                _invoke_with_fallback,
                 provider,
                 Rebuttal,
                 build_rebuttal_messages(
                     a, target, domain, target_date, context_md, prior_theses,
                 ),
-                None,
                 callback,
             ): a
             for a in analysts
@@ -330,14 +448,15 @@ def _run_round_rebuttals(
         for fut, agent_id in futures.items():
             try:
                 r = fut.result()
-                if isinstance(r, Rebuttal):
-                    r.agent_id = agent_id
-                    r.target = target
-                    r.domain = Domain(domain)
-                    r.round = round_idx
-                    out.append(r)
             except Exception as e:
-                log.error("debate.rebuttal_failed", agent=agent_id, error=str(e))
+                log.error("debate.rebuttal_dropped_unexpected", agent=agent_id, error=str(e))
+                continue
+            if isinstance(r, Rebuttal):
+                r.agent_id = agent_id
+                r.target = target
+                r.domain = Domain(domain)
+                r.round = round_idx
+                out.append(r)
     return out
 
 
@@ -354,67 +473,21 @@ def _run_synthesis(
 ) -> Verdict:
     msgs = build_verdict_messages(target, domain, target_date, context_md, theses, rebuttals)
     counts = _tally(theses, rebuttals)
-    v = _synthesize_via_structured(provider, msgs, counts, callback)
+    v = _invoke_with_fallback(
+        provider, Verdict, msgs, callback,
+        counts=counts, target=target, domain=domain,
+    )
     if v is not None:
+        v.consensus = counts["consensus"]
+        v.bull_count = counts["bull"]
+        v.bear_count = counts["bear"]
+        v.neutral_count = counts["neutral"]
+        v.avg_conviction = counts["avg_conviction"]
         v.target = target
         v.domain = Domain(domain)
         return v
-    v = _synthesize_via_plain_invoke(provider, msgs, counts, callback, target, domain)
-    if v is not None:
-        return v
-    log.warning("debate.synthesis_falling_back_heuristic", error="both structured and plain invoke failed")
+    log.warning("debate.synthesis_falling_back_heuristic", error="all fallback levels returned None")
     return _heuristic_verdict(target, domain, theses, rebuttals)
-
-
-def _synthesize_via_structured(
-    provider: LLMProvider,
-    msgs: list[dict[str, str]],
-    counts: dict[str, Any],
-    callback: Any | None,
-) -> Verdict | None:
-    try:
-        v = _invoke_structured(provider, Verdict, msgs, None, callback)
-    except Exception as e:
-        log.warning("debate.synthesis_structured_failed_falling_back", error=str(e))
-        return None
-    v.consensus = counts["consensus"]
-    v.bull_count = counts["bull"]
-    v.bear_count = counts["bear"]
-    v.neutral_count = counts["neutral"]
-    v.avg_conviction = counts["avg_conviction"]
-    return v
-
-
-def _synthesize_via_plain_invoke(
-    provider: LLMProvider,
-    msgs: list[dict[str, str]],
-    counts: dict[str, Any],
-    callback: Any | None,
-    target: str,
-    domain: str,
-) -> Verdict | None:
-    model = provider.get_model()
-    cfg: dict[str, Any] = {}
-    if callback is not None:
-        cfg["callbacks"] = [callback]
-    try:
-        response = model.invoke(msgs, config=cfg or None)
-    except Exception as e:
-        log.warning("debate.synthesis_plain_invoke_failed", error=str(e))
-        return None
-    d = _parse_json_or_default(_extract_content(response))
-    d["target"] = target
-    d["domain"] = domain
-    d["consensus"] = counts["consensus"]
-    d["bull_count"] = counts["bull"]
-    d["bear_count"] = counts["bear"]
-    d["neutral_count"] = counts["neutral"]
-    d["avg_conviction"] = counts["avg_conviction"]
-    try:
-        return Verdict(**d)
-    except Exception as e:
-        log.warning("debate.synthesis_verdict_build_failed", error=str(e))
-        return None
 
 
 def _tally(theses: list[Thesis], rebuttals: list[Rebuttal]) -> dict[str, Any]:
