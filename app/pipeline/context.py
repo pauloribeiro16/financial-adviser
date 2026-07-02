@@ -5,6 +5,7 @@ from typing import Any
 from app.catalog import get_catalog
 from app.logging import get_logger
 from app.pipeline import edgar, macro, market, news
+from app.pipeline.metrics import derive_metrics
 
 log = get_logger(__name__)
 
@@ -255,6 +256,17 @@ def _render_company(ctx: dict[str, Any]) -> str:
             else:
                 acc_label = acc or "?"
             sections.append(f"- **{date}** — 8-K (items: {code}) — accession {acc_label}")
+
+    metrics = derive_metrics(fundamentals, quote, edgar.get("facts"))
+    if metrics:
+        sections.append("\n## Derived metrics")
+        sections.append("| Metric | Value | Benchmark | Rating |")
+        sections.append("|---|---|---|---|")
+        for name in sorted(metrics):
+            m = metrics[name]
+            label = name.replace("_", " ").title()
+            rating = m.get("rating") or "⚪"
+            sections.append(f"| {label} | {m['display']} | {m['benchmark']} | {rating} |")
 
     return "\n".join(sections) + "\n"
 
