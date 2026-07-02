@@ -16,12 +16,20 @@ from app.models import (
     Direction,
     Domain,
     Rebuttal,
+    RebuttalInput,
     Thesis,
+    ThesisInput,
     Verdict,
 )
 from app.providers import LLMProvider, ProviderRegistry
 
 log = get_logger(__name__)
+
+
+LLM_INPUT_SCHEMA: dict[str, type[BaseModel]] = {
+    "Thesis": ThesisInput,
+    "Rebuttal": RebuttalInput,
+}
 
 
 def _read(path: str) -> str:
@@ -111,10 +119,7 @@ def build_rebuttal_messages(
 ) -> list[dict[str, str]]:
     system = persona_system_prompt(persona_id, target_kind=domain)
     system += f"\n\n===\nYou are assessing {target} as of {target_date.isoformat()}.\n{_hint_for(persona_id)}\n==="
-    other = "\n\n".join(
-        f"### {t.agent_id} (round {t.round}) — verdict {t.verdict.value} (conv {t.conviction:.2f})\n{t.reasoning}\nKey drivers: {'; '.join(t.key_drivers)}"
-        for t in prior_theses
-    )
+    other = "\n\n".join(_condense_thesis(t) for t in prior_theses)
     user = (
         f"# Data context for {target}\n\n{context_md}\n\n"
         f"# Other personas' theses (round {prior_theses[0].round})\n\n{other}\n\n"
@@ -201,6 +206,13 @@ _SCHEMA_DEFAULTS: dict[str, dict[str, Any]] = {
         "key_drivers": [],
         "data_used": [],
     },
+    "ThesisInput": {
+        "verdict": "NEUTRAL",
+        "conviction": 0.5,
+        "reasoning": "[unavailable]",
+        "key_drivers": [],
+        "data_used": [],
+    },
     "Rebuttal": {
         "agent_id": "[unavailable]",
         "target": "[unavailable]",
@@ -213,8 +225,32 @@ _SCHEMA_DEFAULTS: dict[str, dict[str, Any]] = {
         "concessions": [],
         "disagreements": [],
     },
+    "RebuttalInput": {
+        "revised_verdict": "NEUTRAL",
+        "revised_conviction": 0.5,
+        "reasoning": "[unavailable]",
+        "targets": [],
+        "concessions": [],
+        "disagreements": [],
+    },
     "Verdict": {},
 }
+
+
+def _condense_thesis(t: Thesis, excerpt_chars: int = 250) -> str:
+    """Compact view of a prior thesis for rebuttal prompts."""
+    excerpt = (t.reasoning or "")[:excerpt_chars]
+    if len(t.reasoning or "") > excerpt_chars:
+        cut = excerpt.rfind(". ")
+        if cut > excerpt_chars * 0.5:
+            excerpt = excerpt[: cut + 1]
+        excerpt += " …"
+    parts = [f"- **{t.agent_id}**: {t.verdict.value} (conv {t.conviction:.2f})"]
+    if t.key_drivers:
+        parts.append(f"  - drivers: {'; '.join(t.key_drivers[:4])}")
+    if excerpt.strip():
+        parts.append(f"  - reasoning excerpt: {excerpt}")
+    return "\n".join(parts)
 
 
 def _invoke_structured(
@@ -234,6 +270,56 @@ def _invoke_structured(
     return structured.invoke(messages)
 
 
+def _promote_to_full(
+    instance: BaseModel,
+    full_schema: type[BaseModel],
+    llm_schema: type[BaseModel],
+    full_defaults: dict[str, Any],
+) -> BaseModel:
+    """Wrap a slim instance (or already-full instance) into the full schema.
+
+    If ``instance`` is already a ``full_schema``, return as-is (covers test
+    mocks and any LLM that returns the full schema regardless of request).
+    Otherwise the slim instance is merged on top of the full defaults so
+    id-fields get reasonable placeholders that the caller can overwrite.
+    """
+    if isinstance(instance, full_schema):
+        return instance
+    full_data = dict(full_defaults)
+    full_data.update(instance.model_dump())
+    return full_schema(**full_data)
+
+
+def _try_l1(model: Any, target_schema: type[BaseModel], messages: list[dict[str, str]], cfg: dict[str, Any] | None) -> BaseModel | None:
+    """Attempt a single L1 (structured-with-include-raw) invocation.
+
+    Returns the parsed ``BaseModel`` on success, ``None`` on any failure
+    (TypeError on include_raw, parse error, or schema mismatch).
+    """
+    try:
+        s = model.with_structured_output(target_schema, include_raw=True)
+        res = s.invoke(messages, config=cfg or None)
+        if isinstance(res, dict):
+            parsed = res.get("parsed")
+            if isinstance(parsed, BaseModel):
+                return parsed
+        elif isinstance(res, BaseModel):
+            return res
+    except TypeError:
+        try:
+            s = model.with_structured_output(target_schema)
+            res = s.invoke(messages, config=cfg or None)
+            if isinstance(res, BaseModel):
+                return res
+            if isinstance(res, dict) and isinstance(res.get("parsed"), BaseModel):
+                return res["parsed"]
+        except Exception:
+            return None
+    except Exception:
+        return None
+    return None
+
+
 def _invoke_with_fallback(
     provider: LLMProvider,
     schema: type[BaseModel],
@@ -244,7 +330,14 @@ def _invoke_with_fallback(
     domain: str = "",
 ) -> BaseModel | None:
     schema_name = schema.__name__
-    defaults = _SCHEMA_DEFAULTS.get(schema_name, {})
+    full_defaults = _SCHEMA_DEFAULTS.get(schema_name, {})
+    llm_schema = LLM_INPUT_SCHEMA.get(schema_name, schema)
+    llm_schema_name = llm_schema.__name__
+    slim_defaults = {
+        k: v for k, v in full_defaults.items() if k in llm_schema.model_fields
+    }
+    if not slim_defaults and llm_schema_name != schema_name:
+        slim_defaults = _SCHEMA_DEFAULTS.get(llm_schema_name, {})
 
     cfg: dict[str, Any] = {}
     if callback is not None:
@@ -252,39 +345,27 @@ def _invoke_with_fallback(
 
     model = provider.get_model()
 
+    parsed = _try_l1(model, llm_schema, messages, cfg)
+    if parsed is None and llm_schema is not schema:
+        parsed = _try_l1(model, schema, messages, cfg)
+    if parsed is not None:
+        log.debug("debate.invoke.completed", level=1, schema=schema_name)
+        return _promote_to_full(parsed, schema, llm_schema, full_defaults)
     try:
-        s = model.with_structured_output(schema, include_raw=True)
+        s = model.with_structured_output(llm_schema, include_raw=True)
         res = s.invoke(messages, config=cfg or None)
         if isinstance(res, dict):
-            parsed = res.get("parsed")
-            if parsed is not None:
-                log.debug("debate.invoke.fallback_used", level=1, schema=schema_name)
-                return parsed
             err = res.get("parsing_error")
             if err is not None:
                 log.warning("debate.invoke.l1_parsing_error", schema=schema_name, error=str(err)[:200])
-        elif isinstance(res, BaseModel):
-            log.debug("debate.invoke.fallback_used", level=1, schema=schema_name)
-            return res
-    except TypeError:
-        try:
-            s = model.with_structured_output(schema)
-            res = s.invoke(messages, config=cfg or None)
-            if isinstance(res, BaseModel):
-                log.debug("debate.invoke.fallback_used", level=1, schema=schema_name)
-                return res
-            if isinstance(res, dict) and isinstance(res.get("parsed"), BaseModel):
-                return res["parsed"]
-        except Exception as e:
-            log.warning("debate.invoke.l1_failed", schema=schema_name, error=str(e)[:200])
-    except Exception as e:
-        log.warning("debate.invoke.l1_failed", schema=schema_name, error=str(e)[:200])
+    except (TypeError, Exception):
+        pass
 
     try:
         response = model.invoke(messages, config=cfg or None)
         content = _extract_content(response)
         d = _parse_json_or_default(content)
-        for k, v in defaults.items():
+        for k, v in slim_defaults.items():
             d.setdefault(k, v)
         if schema_name == "Verdict":
             d.setdefault("target", target)
@@ -306,9 +387,9 @@ def _invoke_with_fallback(
             d.setdefault("summary", "[unavailable]")
             d.setdefault("points_of_agreement", [])
             d.setdefault("points_of_disagreement", [])
-        instance = schema(**d)
+        slim_instance = llm_schema(**d)
         log.warning("debate.invoke.fallback_used", level=2, schema=schema_name)
-        return instance
+        return _promote_to_full(slim_instance, schema, llm_schema, full_defaults)
     except Exception as e:
         log.warning("debate.invoke.l2_failed", schema=schema_name, error=str(e)[:200])
 
@@ -317,9 +398,9 @@ def _invoke_with_fallback(
         return _heuristic_verdict(target, domain, [], [])
 
     try:
-        instance = schema(**defaults)
+        slim_instance = llm_schema(**slim_defaults)
         log.warning("debate.invoke.fallback_used", level=3, schema=schema_name)
-        return instance
+        return _promote_to_full(slim_instance, schema, llm_schema, full_defaults)
     except Exception as e:
         log.error("debate.invoke.l3_failed", schema=schema_name, error=str(e)[:200])
         return None

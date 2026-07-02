@@ -79,6 +79,27 @@ class Direction(StrEnum):
     NEUTRAL = "NEUTRAL"
 
 
+_DIRECTION_TOKENS: tuple[str, ...] = ("BULLISH", "BEARISH", "NEUTRAL")
+
+
+def _coerce_direction(v: Any) -> str:
+    """Extract BULLISH/BEARISH/NEUTRAL from a free-form string.
+
+    MiniMax-M3 occasionally returns enum values as sentences such as
+    ``"NEUTRAL with conviction 0.50"``. Pydantic's strict enum validator
+    rejects those. We scan for the first matching token (case-insensitive);
+    fall back to ``"NEUTRAL"`` when nothing is found.
+    """
+    if isinstance(v, str):
+        upper = v.upper()
+        for tok in _DIRECTION_TOKENS:
+            if tok in upper:
+                return tok
+    if hasattr(v, "value"):
+        return v.value
+    return "NEUTRAL"
+
+
 class Domain(StrEnum):
     COMPANY = "company"
     MACRO = "macro"
@@ -142,6 +163,37 @@ class Thesis(BaseModel):
     reasoning: str
     data_used: list[str] = Field(default_factory=list)
 
+    @field_validator("verdict", mode="before")
+    @classmethod
+    def _coerce_verdict(cls, v: Any) -> str:
+        return _coerce_direction(v)
+
+    @field_validator("key_drivers", "data_used", mode="before")
+    @classmethod
+    def _coerce_lists(cls, v: Any) -> list[str]:
+        return _coerce_str_list(v)
+
+
+class ThesisInput(BaseModel):
+    """Schema sent to the LLM for thesis generation.
+
+    Excludes ``agent_id``, ``target``, ``domain`` and ``round`` — those are
+    stamped by the caller (``app.debate.engine._run_round_theses``) AFTER the
+    LLM call. Slimming the tool schema from 7 required fields to 3
+    dramatically improves MiniMax-M3 tool-call reliability.
+    """
+
+    verdict: Direction
+    conviction: float = Field(ge=0.0, le=1.0)
+    key_drivers: list[str] = Field(default_factory=list)
+    reasoning: str
+    data_used: list[str] = Field(default_factory=list)
+
+    @field_validator("verdict", mode="before")
+    @classmethod
+    def _coerce_verdict(cls, v: Any) -> str:
+        return _coerce_direction(v)
+
     @field_validator("key_drivers", "data_used", mode="before")
     @classmethod
     def _coerce_lists(cls, v: Any) -> list[str]:
@@ -159,6 +211,36 @@ class Rebuttal(BaseModel):
     revised_verdict: Direction
     revised_conviction: float = Field(ge=0.0, le=1.0)
     reasoning: str
+
+    @field_validator("revised_verdict", mode="before")
+    @classmethod
+    def _coerce_revised_verdict(cls, v: Any) -> str:
+        return _coerce_direction(v)
+
+    @field_validator("targets", "concessions", "disagreements", mode="before")
+    @classmethod
+    def _coerce_lists(cls, v: Any) -> list[str]:
+        return _coerce_str_list(v)
+
+
+class RebuttalInput(BaseModel):
+    """Schema sent to the LLM for rebuttal generation.
+
+    Excludes the same id-fields as ``ThesisInput``. Slim from 7 required to
+    3 required so MiniMax-M3 tool calls succeed more reliably.
+    """
+
+    targets: list[str] = Field(default_factory=list)
+    concessions: list[str] = Field(default_factory=list)
+    disagreements: list[str] = Field(default_factory=list)
+    revised_verdict: Direction
+    revised_conviction: float = Field(ge=0.0, le=1.0)
+    reasoning: str
+
+    @field_validator("revised_verdict", mode="before")
+    @classmethod
+    def _coerce_revised_verdict(cls, v: Any) -> str:
+        return _coerce_direction(v)
 
     @field_validator("targets", "concessions", "disagreements", mode="before")
     @classmethod
