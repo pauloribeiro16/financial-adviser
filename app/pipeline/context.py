@@ -105,17 +105,23 @@ def build_company_context(ticker: str, *, with_filings: bool = False) -> dict[st
         "news": news_items,
         "material_events": events,
     }
+    from app.filings import cache as filings_cache
+
     if with_filings:
         from app.filings.summarizer import get_or_build_summary
 
         filing = get_or_build_summary(ticker, provider_name="minimax")
-        if filing is not None:
-            ctx["filing_summary"] = filing
-            log.info(
-                "pipeline.context.filing_attached",
-                ticker=ticker,
-                filing_date=filing.filing_date,
-            )
+    else:
+        cached_date = filings_cache.latest_filing_date(ticker)
+        filing = filings_cache.get(ticker, cached_date) if cached_date else None
+    if filing is not None:
+        ctx["filing_summary"] = filing
+        log.info(
+            "pipeline.context.filing_attached",
+            ticker=ticker,
+            with_filings=with_filings,
+            from_cache=not with_filings,
+        )
     return ctx
 
 

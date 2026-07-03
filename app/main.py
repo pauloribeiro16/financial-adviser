@@ -426,6 +426,11 @@ def _run_debate(
         try:
             results: list[DebateResult] = []
             for tgt in targets:
+                ctx = None
+                if args.with_filings and domain == "company":
+                    from app.pipeline.context import build_company_context
+
+                    ctx = build_company_context(tgt, with_filings=True)
                 results.append(
                     run_debate_only(
                         analysts=analysts,
@@ -437,6 +442,7 @@ def _run_debate(
                         include_synthesis=include_synthesis,
                         session_id=args.session_id,
                         output_format=args.format,
+                        ctx=ctx,
                     )
                 )
         except RuntimeError as e:
@@ -455,6 +461,11 @@ def _run_debate(
         for tgt in targets:
             run_ts = run_timestamp()
             completed_at = datetime.now().isoformat(timespec="seconds")
+            ctx = None
+            if args.with_filings and domain == "company":
+                from app.pipeline.context import build_company_context
+
+                ctx = build_company_context(tgt, with_filings=True)
             result = run_debate_only(
                 analysts=analysts,
                 target=tgt,
@@ -465,6 +476,7 @@ def _run_debate(
                 include_synthesis=include_synthesis,
                 session_id=args.session_id,
                 output_format=args.format,
+                ctx=ctx,
             )
 
             if domain == "company":
