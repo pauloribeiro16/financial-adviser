@@ -41,19 +41,48 @@ DEFAULT_MACRO_ANALYSTS: list[str] = ["dalio", "gundlach", "volcker", "greenspan"
 DEFAULT_INDICATORS: list[str] = ["US.FFR", "US.CPI.YOY"]
 FORMATS: list[str] = ["debate", "md", "json", "per-agent"]
 
+SECTOR_TICKERS: dict[str, list[tuple[str, str]]] = {
+    "Financial Services": [
+        ("JPM",  "JPMorgan Chase"),
+        ("BAC",  "Bank of America"),
+        ("GS",   "Goldman Sachs"),
+        ("MS",   "Morgan Stanley"),
+        ("WFC",  "Wells Fargo"),
+        ("V",    "Visa"),
+        ("MA",   "Mastercard"),
+        ("BLK",  "BlackRock"),
+    ],
+    "Technology": [
+        ("AAPL", "Apple"),
+        ("MSFT", "Microsoft"),
+        ("NVDA", "NVIDIA"),
+        ("GOOGL","Alphabet"),
+        ("META", "Meta Platforms"),
+        ("ADBE", "Adobe"),
+        ("CRM",  "Salesforce"),
+        ("AVGO", "Broadcom"),
+    ],
+    "Healthcare": [
+        ("JNJ",  "Johnson & Johnson"),
+        ("UNH",  "UnitedHealth Group"),
+        ("LLY",  "Eli Lilly"),
+        ("PFE",  "Pfizer"),
+        ("ABBV", "AbbVie"),
+        ("MRK",  "Merck"),
+        ("TMO",  "Thermo Fisher Scientific"),
+    ],
+    "Energy": [
+        ("XOM",  "ExxonMobil"),
+        ("CVX",  "Chevron"),
+        ("COP",  "ConocoPhillips"),
+        ("SLB",  "Schlumberger"),
+        ("EOG",  "EOG Resources"),
+        ("MPC",  "Marathon Petroleum"),
+    ],
+}
+
 POPULAR_TICKERS: list[tuple[str, str]] = [
-    ("AAPL",  "Apple"),
-    ("MSFT",  "Microsoft"),
-    ("NVDA",  "NVIDIA"),
-    ("GOOGL", "Alphabet"),
-    ("AMZN",  "Amazon"),
-    ("META",  "Meta Platforms"),
-    ("TSLA",  "Tesla"),
-    ("BRK-B", "Berkshire Hathaway B"),
-    ("JPM",   "JPMorgan Chase"),
-    ("V",     "Visa"),
-    ("WMT",   "Walmart"),
-    ("JNJ",   "Johnson & Johnson"),
+    ticker for sector in SECTOR_TICKERS.values() for ticker in sector
 ]
 
 _PERSONA_NAMES: dict[str, str] = {pid: name for pid, name, *_ in _PERSONA_DEFS}
@@ -106,11 +135,6 @@ def _persona_label(pid: str) -> str:
     name = _PERSONA_NAMES.get(pid, pid.title())
     school = _PERSONA_SCHOOL.get(pid, "")
     return f"{name}  ({school})" if school else name
-
-
-def _ticker_options() -> tuple[list[str], int]:
-    labels = [f"{sym}  ({name})" for sym, name in POPULAR_TICKERS]
-    return labels, 0
 
 
 def _indicator_options() -> tuple[list[str], list[str], list[int]]:
@@ -185,10 +209,30 @@ def interactive_pick(defaults: dict[str, Any]) -> dict[str, Any]:
     domain = "company" if picked_idx == 0 else "macro"
 
     if domain == "company":
-        ticker_labels, _ = _ticker_options()
+        sector_labels = list(SECTOR_TICKERS.keys())
         default_target = str(defaults.get("target") or "AAPL").upper()
+        default_sector = next(
+            (sec for sec, tickers in SECTOR_TICKERS.items()
+             if any(t == default_target for t, _ in tickers)),
+            "Financial Services",
+        )
+        sector_idx = sector_labels.index(default_sector) if default_sector in sector_labels else 0
+        picked_idx = _safe(
+            lambda: beaupy.select(
+                sector_labels,
+                cursor=">",
+                cursor_index=sector_idx,
+                pagination=False,
+                return_index=True,
+            ),
+            sector_idx,
+        )
+        selected_sector = sector_labels[picked_idx]
+        sector_picks = SECTOR_TICKERS[selected_sector]
+
+        ticker_labels = [f"{sym}  ({name})" for sym, name in sector_picks]
         ticker_idx = next(
-            (i for i, (sym, _) in enumerate(POPULAR_TICKERS) if sym == default_target),
+            (i for i, (sym, _) in enumerate(sector_picks) if sym == default_target),
             0,
         )
         picked_idx = _safe(
@@ -197,12 +241,12 @@ def interactive_pick(defaults: dict[str, Any]) -> dict[str, Any]:
                 cursor=">",
                 cursor_index=ticker_idx,
                 pagination=True,
-                page_size=12,
+                page_size=10,
                 return_index=True,
             ),
             ticker_idx,
         )
-        ticker = POPULAR_TICKERS[picked_idx][0]
+        ticker = sector_picks[picked_idx][0]
         target = ticker
         indicators: list[str] = []
     else:
