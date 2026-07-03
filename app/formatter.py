@@ -2,13 +2,18 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
-from app.models import Assessment
+from rich.console import Console
+from rich.table import Table
+
+from app.models import Assessment, DebateResult, Direction
 
 __all__ = [
     "render",
     "render_per_agent",
     "render_summary",
+    "render_debate_rich",
     "default_output_path",
     "default_run_dir",
     "ensure_parent_dir",
@@ -256,3 +261,96 @@ def render_summary(assessments: list[Assessment], meta: dict) -> str:
                 lines.append(f"- [{pid}/{ind}.md]({pid}/{ind}.md)")
     lines.append("")
     return "\n".join(lines)
+
+
+def _verdict_style(direction: Any) -> str:
+    name = direction.value if isinstance(direction, Direction) else str(direction)
+    if name == Direction.BULLISH.value:
+        return "bold green"
+    if name == Direction.BEARISH.value:
+        return "bold red"
+    return "bold yellow"
+
+
+def _first_line(text: str, limit: int = 80) -> str:
+    s = (text or "").strip().splitlines()
+    head = s[0] if s else ""
+    if len(head) <= limit:
+        return head
+    return head[: limit - 1] + "…"
+
+
+def render_debate_rich(result: DebateResult, console: Console | None = None) -> None:
+    """Pretty-print a ``DebateResult`` to a (possibly TTY-attached) ``Console``.
+
+    The output is intentionally non-ASCII-tolerant (rich handles color/escape
+    codes) and uses a sectioned layout:
+
+      - HEADER (target / domain / date)
+      - TABLE: Persona | Round | Verdict | Conviction | Key drivers (first line)
+      - SYNTHESIS bullet list (only when ``result.verdict`` is present)
+    """
+    con = console or Console()
+
+    con.print()
+    con.rule(f"[bold cyan]Debate — {result.target} ({result.domain.value})[/bold cyan]")
+    meta_parts = [
+        f"date: {result.target_date}",
+        f"provider: {result.provider}",
+        f"analysts: {', '.join(result.analysts)}",
+        f"theses: {len(result.theses)}",
+        f"rebuttals: {len(result.rebuttals)}",
+    ]
+    con.print("  " + "  ·  ".join(meta_parts))
+    con.print()
+
+    rows: list[tuple[str, int, Any, float, str, str]] = []
+    for t in result.theses:
+        rows.append((t.agent_id, t.round, t.verdict, t.conviction, _first_line(t.reasoning), "thesis"))
+    for rb in result.rebuttals:
+        rows.append((rb.agent_id, rb.round, rb.revised_verdict, rb.revised_conviction, _first_line(rb.reasoning), "rebuttal"))
+
+    if rows:
+        tbl = Table(title="Positions", show_lines=False, header_style="bold cyan")
+        tbl.add_column("Persona", style="bold")
+        tbl.add_column("Round", justify="right")
+        tbl.add_column("Verdict")
+        tbl.add_column("Conviction", justify="right")
+        tbl.add_column("Key driver / first line", overflow="fold")
+        tbl.add_column("Kind", justify="center")
+        for persona, round_idx, verdict, conv, first, kind in rows:
+            tbl.add_row(
+                PERSONA_NAMES.get(persona, persona),
+                str(round_idx),
+                f"[{_verdict_style(verdict)}]{verdict.value if isinstance(verdict, Direction) else str(verdict)}[/{_verdict_style(verdict)}]",
+                f"{conv:.2f}",
+                first,
+                kind,
+            )
+        con.print(tbl)
+        con.print()
+
+    if result.verdict is not None:
+        v = result.verdict
+        con.rule(f"[bold magenta]SYNTHESIS — consensus {v.consensus.value}[/bold magenta]")
+        con.print(
+            f"  [bold]Final call:[/bold] {v.final_call}    "
+            f"[bold]Confidence:[/bold] {v.confidence:.2f}    "
+            f"[bold]Avg conviction:[/bold] {v.avg_conviction:.2f}"
+        )
+        con.print(
+            f"  [bold]Tally:[/bold] bull={v.bull_count}  bear={v.bear_count}  neutral={v.neutral_count}"
+        )
+        if v.points_of_agreement:
+            con.print("  [bold green]Points of agreement:[/bold green]")
+            for p in v.points_of_agreement:
+                con.print(f"    • {p}")
+        if v.points_of_disagreement:
+            con.print("  [bold red]Points of disagreement:[/bold red]")
+            for p in v.points_of_disagreement:
+                con.print(f"    • {p}")
+        if v.summary:
+            con.print("  [bold]Summary:[/bold]")
+            for ln in (v.summary or "").splitlines():
+                con.print(f"    {ln}" if ln.strip() else "")
+        con.print()
