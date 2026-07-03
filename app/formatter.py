@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -17,6 +18,11 @@ __all__ = [
     "default_output_path",
     "default_run_dir",
     "ensure_parent_dir",
+    "slugify",
+    "run_timestamp",
+    "run_dir",
+    "per_agent_dir",
+    "output_path",
     "PERSONA_NAMES",
 ]
 
@@ -162,6 +168,43 @@ def ensure_parent_dir(path: str | Path) -> Path:
     parent = p.parent if p.suffix else p
     parent.mkdir(parents=True, exist_ok=True)
     return p
+
+
+def slugify(s: str) -> str:
+    """Lowercase kebab-case slug: 'Financial Services' -> 'financial-services'."""
+    return re.sub(r"[^a-z0-9]+", "-", s.lower()).strip("-")
+
+
+def run_timestamp() -> str:
+    """ISO timestamp safe for filenames (no colons). Includes ms."""
+    return datetime.now().strftime("%Y-%m-%dT%H-%M-%S_%f")[:-3]
+
+
+def run_dir(domain: str, group: str, target: str) -> Path:
+    """Per-target directory that holds all runs for this domain/group/target."""
+    base = Path("out") / domain / slugify(group) / target.upper()
+    base.mkdir(parents=True, exist_ok=True)
+    return base
+
+
+def per_agent_dir(domain: str, group: str, target: str) -> Path:
+    p = run_dir(domain, group, target) / "per_agent"
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def output_path(
+    domain: str,
+    group: str,
+    target: str,
+    run_ts: str,
+    provider: str,
+    kind: str,
+    ext: str = "md",
+) -> Path:
+    """Full path for a single output file."""
+    safe_provider = slugify(provider) or "provider"
+    return run_dir(domain, group, target) / f"{run_ts}_{safe_provider}_{kind}.{ext}"
 
 
 def _render_single(assessment: Assessment, meta: dict) -> str:
