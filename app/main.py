@@ -120,6 +120,8 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--rich", action="store_true",
                    help="In debate mode with no --output and a TTY stdout, render the result "
                         "via rich tables/colors instead of writing Markdown.")
+    p.add_argument("--with-filings", action="store_true", default=False,
+                   help="Download and summarize latest 10-K before debate (adds ~30s, ~$0.03).")
     p.add_argument("--env", default="development", choices=["development", "production"])
     return p.parse_args(argv)
 

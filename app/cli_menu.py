@@ -454,6 +454,15 @@ def interactive_pick(defaults: dict[str, Any]) -> dict[str, Any]:
     )
     include_synthesis = bool(synth)
 
+    filing_default = bool(defaults.get("with_filings", False))
+    include_filings = bool(_safe(
+        lambda: beaupy.confirm(
+            "Include 10-K narrative summary? (downloads + summarizes latest 10-K)",
+            default_is_yes=filing_default,
+        ),
+        filing_default,
+    ))
+
     cfg = {
         "mode": "analyze",
         "domain": domain,
@@ -464,6 +473,7 @@ def interactive_pick(defaults: dict[str, Any]) -> dict[str, Any]:
         "rounds": rounds,
         "format": fmt,
         "include_synthesis": include_synthesis,
+        "with_filings": include_filings,
     }
 
     _render_summary(console, cfg)
