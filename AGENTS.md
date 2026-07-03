@@ -1,3 +1,15 @@
+# 🧠 Operating Mode — Main Thread is for Planning Only
+
+**Never implement, write code, run builds, or manipulate files in the main conversation thread.**
+
+Every implementation must follow this exact flow:
+1. **Contract first** — sprint-contract with done criteria, files to touch, validation commands
+2. **Delegate** — execute via `general` Task subagent(s), never in the main thread
+3. **Parallelise** — independent units of work get separate subagents running concurrently
+4. **Summarise** — the subagent returns a single concise result; the main thread shows only the contract + summary + verification status
+
+---
+
 # AGENTS.md — financial-adviser
 
 Multi-persona macroeconomic assessment pipeline.
@@ -17,7 +29,7 @@ financial-adviser/
 │   ├── agents.py        # BaseAgent + 15 persona classes + ALL_AGENTS + T0/T1/T2 loader
 │   ├── runner.py        # parallel (analyst × indicator) runner (legacy) + run_debate_only
 │   ├── orchestrator/    # → app/debate/orchestrator.py (data ingest + engine + trace)
-│   ├── main.py          # CLI entry: python -m app.main --company AAPL --analysts ...
+│   ├── main.py          # CLI entry: python3 -m app.main --company AAPL --analysts ...
 │   ├── cli_menu.py      # questionary interactive picker (company | macro | analysts | rounds | format)
 │   ├── catalog.py       # 8 US FRED indicators (slim)
 │   ├── models.py        # Pydantic schemas (Assessment, DebateResult, Thesis, Rebuttal, Verdict, Domain)
@@ -99,7 +111,7 @@ Every persona MUST:
 2. Add a hint to the `_HINTS` dict in `app/agents.py` (2 fields: `related`, `remember`).
 3. Add an entry to `_PERSONA_DEFS` in `app/agents.py` (4 fields: `id`, `name`, `school`, `description`).
 4. `ruff check app/ tests/` should pass.
-5. `python -m app.main --analysts <id> --provider mock` should print a valid assessment (legacy) or `python -m app.main --company AAPL --analysts <id> --provider mock` should print a debate result.
+5. `python3 -m app.main --analysts <id> --provider mock` should print a valid assessment (legacy) or `python3 -m app.main --company AAPL --analysts <id> --provider mock` should print a debate result.
 
 ## Adding a New Indicator
 
@@ -112,14 +124,14 @@ Every persona MUST:
 ```bash
 export MINIMAX_API_KEY=sk-...
 export ANTHROPIC_BASE_URL=https://api.minimax.io/anthropic  # default
-python -m app.main --company AAPL --analysts buffett,taleb --provider minimax
+python3 -m app.main --company AAPL --analysts buffett,taleb --provider minimax
 ```
 
 Or for tests / offline:
 
 ```bash
-python -m app.main --company AAPL --analysts buffett --provider mock --rounds 1
-python -m app.main --analysts buffett --provider mock          # legacy macro
+python3 -m app.main --company AAPL --analysts buffett --provider mock --rounds 1
+python3 -m app.main --analysts buffett --provider mock          # legacy macro
 ```
 
 The `MockProvider` returns a `MockModel` whose `invoke()` returns a `SimpleNamespace` with placeholder fields — useful for unit tests and CI without network. Debate runs use a `_SchemaAwareMockProvider` from `tests/_mock_provider.py` (installed automatically by the orchestrator) that knows about `Thesis`, `Rebuttal` and `Verdict` as well.
@@ -131,19 +143,19 @@ The `MockProvider` returns a `MockModel` whose `invoke()` returns a `SimpleNames
 pip install -e .
 
 # interactive (questionary menus for domain / personas / rounds / format)
-python -m app.main --interactive
+python3 -m app.main --interactive
 
 # minimal smoke (no API key)
-python -m app.main --analysts buffett --indicators US.FFR --provider mock
+python3 -m app.main --analysts buffett --indicators US.FFR --provider mock
 
 # company + 2 analysts, real debate
-python -m app.main --company AAPL --analysts buffett,taleb --provider minimax --rounds 2
+python3 -m app.main --company AAPL --analysts buffett,taleb --provider minimax --rounds 2
 
 # rich output (auto-activates when stdout is a TTY and no --output is set)
-python -m app.main --company AAPL --analysts buffett --provider mock --rich
+python3 -m app.main --company AAPL --analysts buffett --provider mock --rich
 
 # all 15 personas × all 8 indicators (parallel, legacy mode)
-python -m app.main --analysts $(python -c "print(','.join(__import__('app.agents', fromlist=['ALL_AGENTS']).ALL_AGENTS.keys()))") --provider mock
+python3 -m app.main --analysts $(python3 -c "print(','.join(__import__('app.agents', fromlist=['ALL_AGENTS']).ALL_AGENTS.keys()))") --provider mock
 ```
 
 ## Logging
