@@ -56,9 +56,82 @@ class MockModel:
     Suitable for tests and local development without network or API keys.
     """
 
+    def __init__(self, schema=None) -> None:
+        self._schema = schema
+
     def invoke(self, messages, config=None):
+        from app.watch.aggregator import WatchSummary
+
         user_content = messages[-1]["content"] if messages else ""
         preview = user_content[:60].replace("\n", " ")
+        schema = self._schema
+        if schema is WatchSummary:
+            return WatchSummary(
+                moat="[MOCK] deep moat widening",
+                cycle_phase="[MOCK] Capital Return phase",
+                financial_health="[MOCK] FCF margin 12%, net debt 1.2x EBITDA",
+                valuation="[MOCK] Fair at 12x P/FCF vs sector 14x",
+                risks="[MOCK] Cyclical demand | FX drag | Regulatory",
+            )
+        if schema is not None and hasattr(schema, "model_fields"):
+            from app.models import Assessment, Rebuttal, Thesis, Verdict
+
+            if schema is Assessment:
+                return SimpleNamespace(
+                    diagnosis=f"[MOCK diagnosis based on: {preview}...]",
+                    outlook="[MOCK] Outlook: NEUTRAL, awaiting data.",
+                    key_drivers=["mock driver 1", "mock driver 2", "mock driver 3"],
+                    news_interpretation="[MOCK] No material news in scope.",
+                    reasoning_trace="[MOCK] Reasoning trace: placeholder for testing.",
+                    signal_direction="NEUTRAL",
+                    signal_strength=0.5,
+                )
+            if schema in (Thesis,):
+                from app.models import Direction, Domain
+
+                return Thesis(
+                    agent_id="mock",
+                    target="MOCK",
+                    domain=Domain.MACRO,
+                    round=0,
+                    verdict=Direction.NEUTRAL,
+                    conviction=0.5,
+                    key_drivers=["mock driver a", "mock driver b"],
+                    reasoning="[MOCK thesis] placeholder reasoning.",
+                    data_used=["mock data point"],
+                )
+            if schema in (Rebuttal,):
+                from app.models import Direction, Domain
+
+                return Rebuttal(
+                    agent_id="mock",
+                    target="MOCK",
+                    domain=Domain.MACRO,
+                    round=1,
+                    targets=["other"],
+                    concessions=["mock concession"],
+                    disagreements=["mock disagreement"],
+                    revised_verdict=Direction.NEUTRAL,
+                    revised_conviction=0.5,
+                    reasoning="[MOCK rebuttal] placeholder reasoning.",
+                )
+            if schema is Verdict:
+                from app.models import Consensus, Domain
+
+                return Verdict(
+                    target="MOCK",
+                    domain=Domain.MACRO,
+                    consensus=Consensus.NEUTRAL,
+                    bull_count=0,
+                    bear_count=0,
+                    neutral_count=2,
+                    avg_conviction=0.5,
+                    points_of_agreement=["mock agreement"],
+                    points_of_disagreement=[],
+                    final_call="[MOCK] Neutral consensus",
+                    confidence=0.5,
+                    summary="[MOCK] Summary of debate.",
+                )
         return SimpleNamespace(
             diagnosis=f"[MOCK diagnosis based on: {preview}...]",
             outlook="[MOCK] Outlook: NEUTRAL, awaiting data.",
@@ -70,7 +143,7 @@ class MockModel:
         )
 
     def with_structured_output(self, schema):
-        return self
+        return MockModel(schema=schema)
 
     def bind_tools(self, tools):
         return self
