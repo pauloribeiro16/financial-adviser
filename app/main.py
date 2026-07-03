@@ -400,6 +400,7 @@ def _run_debate(
                         provider_name=args.provider,
                         include_synthesis=include_synthesis,
                         session_id=args.session_id,
+                        output_format=args.format,
                     )
                 )
         except RuntimeError as e:
@@ -427,6 +428,7 @@ def _run_debate(
                 provider_name=args.provider,
                 include_synthesis=include_synthesis,
                 session_id=args.session_id,
+                output_format=args.format,
             )
 
             if domain == "company":
