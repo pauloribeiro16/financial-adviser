@@ -262,6 +262,10 @@ def orchestrate_debate(
 
     _ensure_mock_provider_is_schema_aware(provider_name)
 
+    if session_id is None:
+        session_id = f"debate-{domain}-{target}-{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        log.info("debate.session_id_auto_generated", session_id=session_id)
+
     if ctx is None:
         ctx = _build_context(domain, target, target_date)
     context_md = pipeline_context.render_context_markdown(ctx, kind=domain)

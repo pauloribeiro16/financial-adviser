@@ -5,6 +5,7 @@ from datetime import date
 from typing import Annotated, Any, Optional, TypedDict
 
 from langchain_core.runnables import RunnableConfig
+from langfuse import observe
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, StateGraph
 from langgraph.types import Send
@@ -103,6 +104,7 @@ def _prior_for_rebuttal(state: DebateState) -> list[Thesis]:
     ]
 
 
+@observe(name="ingest", as_type="span")
 def ingest_node(state: DebateState) -> dict:
     log.info(
         "debate.graph.ingest",
@@ -113,6 +115,7 @@ def ingest_node(state: DebateState) -> dict:
     return {}
 
 
+@observe(name="theses", as_type="span")
 def theses_dispatch_node(state: DebateState) -> dict:
     return {}
 
@@ -124,6 +127,7 @@ def theses_router(state: DebateState) -> list[Send]:
     ]
 
 
+@observe(name="thesis_one", as_type="generation")
 def thesis_one_node(state: DebateState, config: Optional[RunnableConfig] = None) -> dict:  # noqa: UP045
     persona_id = state["_analyst"]
     target = state["target"]
@@ -152,6 +156,7 @@ def thesis_one_node(state: DebateState, config: Optional[RunnableConfig] = None)
     return {"theses": []}
 
 
+@observe(name="rebuttals", as_type="span")
 def rebuttals_dispatch_node(state: DebateState) -> dict:
     return {}
 
@@ -171,6 +176,7 @@ def rebuttals_router(state: DebateState) -> list[Send] | str:
     ]
 
 
+@observe(name="rebuttal_one", as_type="generation")
 def rebuttal_one_node(state: DebateState, config: Optional[RunnableConfig] = None) -> dict:  # noqa: UP045
     persona_id = state["_analyst"]
     target = state["target"]
@@ -204,10 +210,12 @@ def rebuttal_one_node(state: DebateState, config: Optional[RunnableConfig] = Non
     return {"rebuttals": []}
 
 
+@observe(name="advance_round", as_type="span")
 def advance_round_node(state: DebateState) -> dict:
     return {"round": int(state.get("round") or 0) + 1}
 
 
+@observe(name="synthesis", as_type="generation")
 def synthesis_node(state: DebateState, config: Optional[RunnableConfig] = None) -> dict:  # noqa: UP045
     if not bool(state.get("include_synthesis", True)):
         return {}
