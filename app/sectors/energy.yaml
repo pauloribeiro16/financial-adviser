@@ -1,0 +1,57 @@
+sector: Energy
+indicators:
+  - id: wti_yoy
+    name: "WTI Price YoY %"
+    extract: "fundamentals.wti_yoy"
+    healthier_is: higher
+    healthy_threshold: 0.0
+    warning_threshold: -0.15
+    unit: "pct"
+
+  - id: fcf_yield
+    name: "FCF Yield"
+    extract: "fundamentals.fcf_yield"
+    healthier_is: higher
+    healthy_threshold: 0.06
+    warning_threshold: 0.03
+    unit: "pct"
+
+  - id: net_debt_ebitda
+    name: "Net Debt / EBITDA"
+    extract: "fundamentals.net_debt_ebitda"
+    healthier_is: lower
+    healthy_threshold: 1.5
+    warning_threshold: 2.5
+    unit: "x"
+
+  - id: capex_revenue
+    name: "Capex / Revenue"
+    extract: "fundamentals.capex_revenue"
+    healthier_is: lower
+    healthy_threshold: 0.25
+    warning_threshold: 0.35
+    unit: "pct"
+
+  - id: dividend_yield
+    name: "Dividend Yield"
+    extract: "fundamentals.dividend_yield"
+    healthier_is: mid
+    healthy_threshold: 0.03
+    warning_threshold: 0.015
+    unit: "pct"
+
+  - id: share_count_yoy
+    name: "Share Count YoY %"
+    extract: "fundamentals.share_count_yoy"
+    healthier_is: lower
+    healthy_threshold: 0.0
+    warning_threshold: 0.02
+    unit: "pct"
+
+  - id: ev_ebitda
+    name: "EV / EBITDA"
+    extract: "fundamentals.ev_ebitda"
+    healthier_is: lower
+    healthy_threshold: 6.0
+    warning_threshold: 9.0
+    unit: "x"
