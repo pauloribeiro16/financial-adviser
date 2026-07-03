@@ -30,7 +30,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from app.agents import _PERSONA_DEFS, ALL_AGENTS
+from app.agents import _PERSONA_DEFS, personas_for_domain
 from app.catalog import get_catalog
 from app.logging import get_logger
 
@@ -40,6 +40,13 @@ DEFAULT_COMPANY_ANALYSTS: list[str] = ["buffett", "lynch", "burry", "taleb"]
 DEFAULT_MACRO_ANALYSTS: list[str] = ["dalio", "gundlach", "volcker", "greenspan"]
 DEFAULT_INDICATORS: list[str] = ["US.FFR", "US.CPI.YOY"]
 FORMATS: list[str] = ["debate", "md", "json", "per-agent"]
+
+SECTOR_DEFAULT_ANALYSTS: dict[str, list[str]] = {
+    "Financial Services": ["buffett", "lynch", "burry", "dimon"],
+    "Technology":        ["buffett", "lynch", "wood", "taleb"],
+    "Healthcare":        ["buffett", "lynch", "grantham", "taleb"],
+    "Energy":            ["buffett", "dalio", "eisman", "taleb"],
+}
 
 SECTOR_TICKERS: dict[str, list[tuple[str, str]]] = {
     "Financial Services": [
@@ -145,11 +152,20 @@ def _indicator_options() -> tuple[list[str], list[str], list[int]]:
     return labels, ids, []
 
 
-def _persona_options(selected_default: list[str]) -> tuple[list[str], list[int]]:
-    pids = sorted(ALL_AGENTS.keys())
-    labels = [_persona_label(p) for p in pids]
-    ticked = [i for i, p in enumerate(pids) if p in selected_default]
+def _persona_options(
+    available_pids: list[str], selected_default: list[str]
+) -> tuple[list[str], list[int]]:
+    labels = [_persona_label(p) for p in available_pids]
+    ticked = [i for i, p in enumerate(available_pids) if p in selected_default]
     return labels, ticked
+
+
+def _fallback_analysts(domain: str, available: list[str]) -> list[str]:
+    defaults = DEFAULT_COMPANY_ANALYSTS if domain == "company" else DEFAULT_MACRO_ANALYSTS
+    filtered = [p for p in defaults if p in available]
+    if filtered:
+        return filtered
+    return available[:3]
 
 
 def _render_summary(console: Console, cfg: dict[str, Any]) -> None:
@@ -208,6 +224,7 @@ def interactive_pick(defaults: dict[str, Any]) -> dict[str, Any]:
     )
     domain = "company" if picked_idx == 0 else "macro"
 
+    selected_sector: str | None = None
     if domain == "company":
         sector_labels = list(SECTOR_TICKERS.keys())
         default_target = str(defaults.get("target") or "AAPL").upper()
@@ -281,9 +298,22 @@ def interactive_pick(defaults: dict[str, Any]) -> dict[str, Any]:
     )
     provider = "mock" if picked_idx == 0 else "minimax"
 
-    persona_labels, ticked = _persona_options(
-        list(defaults.get("analysts") or (DEFAULT_COMPANY_ANALYSTS if domain == "company" else DEFAULT_MACRO_ANALYSTS))
+    available_pids = personas_for_domain(
+        domain,
+        selected_sector if domain == "company" else None,
     )
+    sector_default = (
+        SECTOR_DEFAULT_ANALYSTS.get(selected_sector, [])
+        if domain == "company" and selected_sector
+        else []
+    )
+    default_analysts = list(
+        defaults.get("analysts")
+        or sector_default
+        or (DEFAULT_COMPANY_ANALYSTS if domain == "company" else DEFAULT_MACRO_ANALYSTS)
+    )
+    filtered_default = [p for p in default_analysts if p in available_pids]
+    persona_labels, ticked = _persona_options(available_pids, filtered_default)
     picked_indices = _safe(
         lambda: beaupy.select_multiple(
             persona_labels,
@@ -295,11 +325,10 @@ def interactive_pick(defaults: dict[str, Any]) -> dict[str, Any]:
         ),
         ticked,
     )
-    pids_sorted = sorted(ALL_AGENTS.keys())
     if picked_indices:
-        analysts = [pids_sorted[i] for i in picked_indices]
+        analysts = [available_pids[i] for i in picked_indices]
     else:
-        analysts = DEFAULT_COMPANY_ANALYSTS if domain == "company" else DEFAULT_MACRO_ANALYSTS
+        analysts = _fallback_analysts(domain, available_pids)
 
     rounds_options = [str(n) for n in range(1, 11)]
     default_rounds = int(defaults.get("rounds", 2))

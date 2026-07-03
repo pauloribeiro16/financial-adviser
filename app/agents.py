@@ -41,6 +41,7 @@ __all__ = [
     "build_indicator_context",
     "build_system_prompt",
     "build_user_prompt",
+    "personas_for_domain",
 ]  # noqa: F822  (re-export Assessment/AgentProfile from app.models)
 
 
@@ -289,6 +290,30 @@ _PERSONA_DEFS: list[tuple[str, str, str, str]] = [
 ]
 
 
+_PERSONA_DOMAINS: dict[str, set[str]] = {
+    "buffett":   {"company", "macro"},
+    "lynch":     {"company", "macro"},
+    "dalio":     {"company", "macro"},
+    "burry":     {"company", "macro"},
+    "eisman":    {"company", "macro"},
+    "grantham":  {"company", "macro"},
+    "simons":    {"company", "macro"},
+    "taleb":     {"company", "macro"},
+    "wood":      {"company", "macro"},
+    "thaler":    {"company", "macro"},
+    "gundlach":  {"company", "macro"},
+    "greenspan": {"macro"},
+    "bernanke":  {"macro"},
+    "volcker":   {"macro"},
+    "dimon":     {"company"},
+}
+
+
+_PERSONA_COMPANY_SECTORS: dict[str, set[str] | None] = {
+    "dimon": {"Financial Services"},
+}
+
+
 def _make_agent_class(persona_id: str, name: str, school: str, description: str) -> type[BaseAgent]:
     """Build a thin BaseAgent subclass for one persona."""
 
@@ -317,3 +342,26 @@ ALL_AGENTS: dict[str, type[BaseAgent]] = {
     pid: _make_agent_class(pid, name, school, desc)
     for pid, name, school, desc in _PERSONA_DEFS
 }
+
+
+def personas_for_domain(domain: str, sector: str | None = None) -> list[str]:
+    """Return persona IDs valid for the given domain and (optional) sector.
+
+    For domain='company':
+      - include personas where 'company' in domains
+      - if sector is provided AND the persona has a company_sectors
+        restriction, the sector must be in that set
+    For domain='macro':
+      - include personas where 'macro' in domains
+      - sector is ignored for macro
+    """
+    out: list[str] = []
+    for pid in sorted(ALL_AGENTS.keys()):
+        if domain not in _PERSONA_DOMAINS.get(pid, {"company", "macro"}):
+            continue
+        if domain == "company":
+            allowed = _PERSONA_COMPANY_SECTORS.get(pid)
+            if allowed is not None and sector is not None and sector not in allowed:
+                continue
+        out.append(pid)
+    return out
