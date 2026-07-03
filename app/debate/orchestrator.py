@@ -156,19 +156,13 @@ def _build_context(domain: str, target: str, target_date: date) -> dict[str, Any
     return pipeline_context.build_macro_context([target], as_of)
 
 
-def _should_use_graph(fmt: str | None, rounds: int) -> bool:
+def _should_use_graph(rounds: int) -> bool:
     """Decide if a debate call should go through the LangGraph graph.py.
 
-    LangGraph path is used for debate mode (rounds > 1 or ``fmt == "debate"``).
-    Legacy path keeps ``engine.run_debate()`` for ``fmt in {"md", "json", "per-agent"}``.
+    Multi-round debates use the LangGraph path; single-round debates fall back
+    to ``engine.run_debate()``.
     """
-    if fmt in ("md", "json", "per-agent"):
-        return False
-    if rounds and rounds > 1:
-        return True
-    if fmt == "debate":
-        return True
-    return False
+    return bool(rounds and rounds > 1)
 
 
 def _state_to_debate_result(
@@ -218,7 +212,6 @@ def orchestrate_debate(
     session_id: str | None = None,
     ctx: dict[str, Any] | None = None,
     trace: DebateTrace | None = None,
-    output_format: str | None = None,
     use_graph: bool | None = None,
 ) -> DebateResult:
     """Run a full debate (data ingest → theses → rebuttals → synthesis) and
@@ -240,13 +233,9 @@ def orchestrate_debate(
             attributes (session_id, tags, metadata, trace_name) via
             ``langfuse.propagate_attributes`` — no-op when Langfuse env
             vars are missing.
-        output_format: optional CLI ``--format`` value (``"md"``, ``"json"``,
-            ``"per-agent"``, ``"debate"``). When provided, used together with
-            ``rounds`` to decide whether to route through the LangGraph graph
-            (``app/debate/graph.py``) or fall back to ``engine.run_debate``.
         use_graph: explicit override for the graph/legacy routing decision.
             When ``None``, the decision is derived from
-            ``_should_use_graph(output_format, rounds)``.
+            ``_should_use_graph(rounds)``.
 
     Returns:
         Fully populated ``DebateResult``.
@@ -278,7 +267,7 @@ def orchestrate_debate(
         sector = (ctx.get("quote") or {}).get("sector")
 
     if use_graph is None:
-        use_graph = _should_use_graph(output_format, rounds)
+        use_graph = _should_use_graph(rounds)
 
     with trace.attributes(
         session_id=session_id,
@@ -300,7 +289,6 @@ def orchestrate_debate(
                 "debate.orchestrator.route",
                 target=target,
                 path="graph",
-                output_format=output_format,
                 rounds=rounds,
             )
             initial_state: dict[str, Any] = {
@@ -344,7 +332,6 @@ def orchestrate_debate(
                 "debate.orchestrator.route",
                 target=target,
                 path="engine",
-                output_format=output_format,
                 rounds=rounds,
             )
             result = engine.run_debate(

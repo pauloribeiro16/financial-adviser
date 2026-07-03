@@ -26,19 +26,19 @@ pip install -e .
 cp .env.example .env && $EDITOR .env             # MINIMAX_API_KEY=sk-...
 
 # 3. interactive menu (domain · analysts · rounds · format)
-python -m app.main --interactive
+python3 -m app.main --interactive
 
 # 4. company mode (debate over AAPL with 2 personas, 2 rounds, mock)
-python -m app.main --company AAPL \
+python3 -m app.main --company AAPL \
                    --analysts buffett,taleb \
                    --provider mock --rounds 2
 
 # 5. rich output to a TTY (no --output required)
-python -m app.main --company AAPL --analysts buffett,taleb \
+python3 -m app.main --company AAPL --analysts buffett,taleb \
                    --provider mock --rounds 1 --rich
 
 # 6. legacy macro (one analyst, one indicator, MD)
-python -m app.main --analysts buffett --indicators US.FFR \
+python3 -m app.main --analysts buffett --indicators US.FFR \
                    --provider mock --format md
 ```
 
@@ -76,17 +76,19 @@ menu or `--analysts` flag.
 
 ### Output formats
 
-`--format {md,json,per-agent,debate}` controls the output shape. Default is
-`debate`. The legacy formats (`md`, `json`, `per-agent`) trigger the legacy
-runner only when the legacy conditions match (single analyst, single indicator,
-no synthesis, no rounds>1).
+`--format {md,json,per-agent}` controls the output shape for the **legacy runner**
+(single analyst + single indicator + no `--rounds>1`). Debate mode is the
+**implicit default** for `--company`, `--rounds > 1`, multiple analysts, or
+multiple indicators — no `--format` flag needed.
 
 | Format        | Default path                                | With `--output PATH`     |
 |---------------|---------------------------------------------|--------------------------|
-| `debate`      | `./out/debate_<TS>/` (per-target MD + _summary.md) | writes to `PATH` (md/json/dir) |
-| `per-agent`   | `./out/run_<TS>/` (tree, legacy)            | writes tree to `PATH`    |
 | `md`          | `./out/run_<TS>.md` (legacy)                | writes to `PATH`         |
 | `json`        | stdout                                      | writes to `PATH`         |
+| `per-agent`   | `./out/run_<TS>/` (tree, legacy)            | writes tree to `PATH`    |
+
+Debate runs always write to `./out/debate_<TS>/` (or to `--output PATH` if
+explicit) regardless of `--format`.
 
 When `--company` is set, the target is always the ticker. When `--indicators`
 is omitted, the CLI defaults to a single indicator: `US.UST10Y`. Pass an
@@ -95,27 +97,27 @@ explicit `--indicators ""` (empty) to get a clear error and exit code 1.
 
 ```bash
 # Debate to default dir
-python -m app.main --company AAPL --analysts buffett,taleb --provider mock
+python3 -m app.main --company AAPL --analysts buffett,taleb --provider mock
 
 # Debate to a specific MD file
-python -m app.main --company AAPL --analysts buffett,taleb \
-                   --provider mock --rounds 1 --format debate \
+python3 -m app.main --company AAPL --analysts buffett,taleb \
+                   --provider mock --rounds 1 \
                    --output /tmp/aapl.md
 
 # Rich to TTY
-python -m app.main --company AAPL --analysts buffett,taleb \
+python3 -m app.main --company AAPL --analysts buffett,taleb \
                    --provider mock --rounds 1 --rich
 
 # Legacy: per-agent tree
-python -m app.main --analysts buffett,burry --indicators US.FFR \
+python3 -m app.main --analysts buffett,burry --indicators US.FFR \
                    --provider mock --format per-agent --output /tmp/run1
 
 # Legacy: Markdown
-python -m app.main --analysts buffett --indicators US.FFR \
+python3 -m app.main --analysts buffett --indicators US.FFR \
                    --provider mock --format md --output /tmp/buffett-ffr.md
 
 # Legacy: JSON to stdout
-python -m app.main --analysts buffett --indicators US.FFR \
+python3 -m app.main --analysts buffett --indicators US.FFR \
                    --provider mock --format json
 ```
 
@@ -128,9 +130,9 @@ pytest tests/
 
 The suite covers the catalog, persona registry, schema round-trip, mock-provider
 end-to-end, runner fan-out, markdown formatter, per-agent layout, default
-single-indicator behaviour, the CLI (`--format {md,per-agent,debate}`), the
-debate engine, the orchestrator (with and without Langfuse env vars), and
-the rich-table formatter.
+single-indicator behaviour, the CLI (`--format {md,per-agent}`), the debate
+engine, the orchestrator (with and without Langfuse env vars), and the
+rich-table formatter.
 
 ## What you get (debate example)
 

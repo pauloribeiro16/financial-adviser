@@ -30,7 +30,6 @@ def test_cli_company_debate_with_mock(tmp_path: Path) -> None:
         "--analysts", "buffett,taleb",
         "--provider", "mock",
         "--rounds", "1",
-        "--format", "debate",
         "--output", str(output),
         "--env", "development",
     )

@@ -39,7 +39,7 @@ log = get_logger(__name__)
 DEFAULT_COMPANY_ANALYSTS: list[str] = ["buffett", "lynch", "burry", "taleb"]
 DEFAULT_MACRO_ANALYSTS: list[str] = ["dalio", "gundlach", "volcker", "greenspan"]
 DEFAULT_INDICATORS: list[str] = ["US.FFR", "US.CPI.YOY"]
-FORMATS: list[str] = ["debate", "md", "json", "per-agent"]
+FORMATS: list[str] = ["md", "json", "per-agent"]
 
 SECTOR_DEFAULT_ANALYSTS: dict[str, list[str]] = {
     "Financial Services": ["buffett", "lynch", "burry", "dimon"],
@@ -200,7 +200,7 @@ def interactive_pick(defaults: dict[str, Any]) -> dict[str, Any]:
         - provider: 'mock' | 'minimax'
         - analysts: list[str]
         - rounds: int
-        - format: 'per-agent' | 'md' | 'json' | 'debate'
+        - format: 'per-agent' | 'md' | 'json' (only set when legacy path)
         - include_synthesis: bool
 
     On non-TTY stdout or any prompt failure, returns ``defaults`` unchanged.
@@ -345,19 +345,27 @@ def interactive_pick(defaults: dict[str, Any]) -> dict[str, Any]:
     )
     rounds = picked_idx + 1
 
-    format_options = [
-        "debate      (Markdown, round-by-round + synthesis)",
-        "md          (single Markdown file)",
-        "json        (structured JSON)",
-        "per-agent   (one file per persona)",
-    ]
-    default_format = defaults.get("format", "debate")
-    fmt_idx = FORMATS.index(default_format) if default_format in FORMATS else 0
-    picked_idx = _safe(
-        lambda: beaupy.select(format_options, cursor=">", cursor_index=fmt_idx, pagination=False, return_index=True),
-        fmt_idx,
+    is_debate_path = (
+        domain == "company"
+        or rounds > 1
+        or len(analysts) > 1
+        or len(indicators) > 1
     )
-    fmt = FORMATS[picked_idx]
+    if is_debate_path:
+        fmt: str | None = None
+    else:
+        format_options = [
+            "md          (single Markdown file)",
+            "json        (structured JSON)",
+            "per-agent   (one file per persona)",
+        ]
+        default_format = defaults.get("format")
+        fmt_idx = FORMATS.index(default_format) if default_format in FORMATS else 0
+        picked_idx = _safe(
+            lambda: beaupy.select(format_options, cursor=">", cursor_index=fmt_idx, pagination=False, return_index=True),
+            fmt_idx,
+        )
+        fmt = FORMATS[picked_idx]
 
     synth_default = bool(defaults.get("include_synthesis", True))
     synth = _safe(
