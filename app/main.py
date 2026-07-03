@@ -29,13 +29,15 @@ from app.cli_menu import (
     interactive_pick,
 )
 from app.formatter import (
-    default_output_path,
-    default_run_dir,
     ensure_parent_dir,
+    output_path,
+    per_agent_dir,
     render,
     render_debate_rich,
     render_per_agent,
     render_summary,
+    run_dir,
+    run_timestamp,
 )
 from app.logging import setup_logging
 from app.models import DebateResult, Direction
@@ -237,6 +239,41 @@ def _print_error_provider(e: RuntimeError) -> None:
     print("      - For offline runs, omit --provider (defaults to mock) or pass --provider mock.", file=sys.stderr)
 
 
+def _resolve_sector(target: str) -> str:
+    try:
+        from app.pipeline.market import quote as fetch_quote
+
+        return fetch_quote(target).get("sector") or "unknown-sector"
+    except Exception:
+        return "unknown-sector"
+
+
+def _write_meta_json(path: Path, meta: dict[str, Any]) -> None:
+    path.write_text(
+        json.dumps(meta, indent=2, default=str, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+
+def _split_debate_per_persona(debate_md: str) -> dict[str, str]:
+    """Split a rendered debate markdown on '### <persona>' headings.
+
+    Returns ``{persona_id: section_markdown}``. The first ``# Debate`` heading
+    (and any preamble up to the first ``### <persona>``) is dropped because
+    per-agent files should be persona-scoped.
+    """
+    sections: dict[str, list[str]] = {}
+    current: str | None = None
+    for line in debate_md.splitlines():
+        if line.startswith("### "):
+            current = line[4:].split()[0].strip()
+            sections[current] = [line]
+            continue
+        if current is not None:
+            sections[current].append(line)
+    return {pid: "\n".join(lines).rstrip() + "\n" for pid, lines in sections.items()}
+
+
 def _run_legacy(
     args: argparse.Namespace,
     analysts: list[str],
@@ -255,47 +292,86 @@ def _run_legacy(
         return 2
 
     run_id = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    run_ts = run_timestamp()
     completed_at = datetime.now().isoformat(timespec="seconds")
+    indicator_id = indicators[0] if indicators else (get_target_indicators()[0] if get_target_indicators() else "UNKNOWN")
     meta = {
         "run_id": run_id,
+        "run_ts": run_ts,
+        "domain": "macro",
+        "indicator": indicator_id,
         "analysts": analysts,
         "indicators": indicators or list(get_target_indicators()),
         "provider": args.provider,
         "target_date": target_date.isoformat(),
         "completed_at": completed_at,
         "n_assessments": len(results),
+        "formats": [args.format],
+        "rounds": 1,
     }
 
-    if args.format == "per-agent":
-        run_dir = args.output or default_run_dir(run_id=run_id)
-        run_dir_path = Path(run_dir)
-        run_dir_path.mkdir(parents=True, exist_ok=True)
+    if args.output:
+        out_path = Path(args.output)
+        if out_path.suffix.lower() in {".md", ".txt"} or args.format == "md":
+            target = ensure_parent_dir(out_path)
+            target.write_text(render(results, meta), encoding="utf-8")
+            print(f"Written: {target}", file=sys.stderr)
+        elif out_path.suffix.lower() == ".json" or args.format == "json":
+            payload = {
+                "run": meta,
+                "assessments": [a.model_dump(mode="json") for a in results],
+            }
+            target = ensure_parent_dir(out_path)
+            target.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
+            print(f"Written: {target}", file=sys.stderr)
+        else:
+            run_dir_path = out_path
+            run_dir_path.mkdir(parents=True, exist_ok=True)
+            per_agent = render_per_agent(results, meta)
+            for persona_id, items in per_agent.items():
+                persona_dir = run_dir_path / persona_id
+                persona_dir.mkdir(exist_ok=True)
+                for ind_id, md_content in items:
+                    (persona_dir / f"{ind_id}.md").write_text(md_content, encoding="utf-8")
+            (run_dir_path / "_summary.md").write_text(render_summary(results, meta), encoding="utf-8")
+            _write_meta_json(run_dir_path / f"{run_ts}_{args.provider}_meta.json", meta)
+            print(f"Written: {run_dir_path}/  ({len(results)} assessments)", file=sys.stderr)
+    elif args.format == "per-agent":
+        target_dir = run_dir("macro", indicator_id, indicator_id)
+        meta["formats"] = ["per-agent"]
         per_agent = render_per_agent(results, meta)
         for persona_id, items in per_agent.items():
-            persona_dir = run_dir_path / persona_id
-            persona_dir.mkdir(exist_ok=True)
-            for indicator_id, md_content in items:
-                (persona_dir / f"{indicator_id}.md").write_text(md_content, encoding="utf-8")
-        summary = render_summary(results, meta)
-        (run_dir_path / "_summary.md").write_text(summary, encoding="utf-8")
-        print(f"Written: {run_dir}/  ({len(results)} assessments)", file=sys.stderr)
+            persona_dir = per_agent_dir("macro", indicator_id, indicator_id)
+            for ind_id, md_content in items:
+                (persona_dir / f"{persona_id}_{ind_id}.md").write_text(md_content, encoding="utf-8")
+        (target_dir / f"{run_ts}_{args.provider}_summary.md").write_text(
+            render_summary(results, meta), encoding="utf-8"
+        )
+        _write_meta_json(target_dir / f"{run_ts}_{args.provider}_meta.json", meta)
+        print(f"Written: {target_dir}/  ({len(results)} assessments)", file=sys.stderr)
     elif args.format == "md":
         text = render(results, meta)
-        output_path = args.output or default_output_path()
-        target = ensure_parent_dir(output_path)
-        target.write_text(text, encoding="utf-8")
-        print(f"Written: {target}", file=sys.stderr)
+        out_file = output_path("macro", indicator_id, indicator_id, run_ts, args.provider, "assessment", "md")
+        ensure_parent_dir(out_file).write_text(text, encoding="utf-8")
+        _write_meta_json(
+            run_dir("macro", indicator_id, indicator_id) / f"{run_ts}_{args.provider}_meta.json",
+            meta,
+        )
+        print(f"Written: {out_file}", file=sys.stderr)
     else:
         payload = {
             "run": meta,
             "assessments": [a.model_dump(mode="json") for a in results],
         }
-        text = json.dumps(payload, indent=2, default=str)
-        if args.output:
-            Path(args.output).write_text(text, encoding="utf-8")
-            print(f"Written: {args.output}", file=sys.stderr)
-        else:
-            print(text)
+        out_file = output_path("macro", indicator_id, indicator_id, run_ts, args.provider, "data", "json")
+        ensure_parent_dir(out_file).write_text(
+            json.dumps(payload, indent=2, default=str), encoding="utf-8"
+        )
+        _write_meta_json(
+            run_dir("macro", indicator_id, indicator_id) / f"{run_ts}_{args.provider}_meta.json",
+            meta,
+        )
+        print(f"Written: {out_file}", file=sys.stderr)
 
     print(f"\nDone: {len(results)} assessments.", file=sys.stderr)
     return 0
@@ -310,21 +386,171 @@ def _run_debate(
     rounds: int,
     include_synthesis: bool,
 ) -> int:
-    try:
-        results: list[DebateResult] = []
-        for tgt in targets:
-            results.append(
-                run_debate_only(
-                    analysts=analysts,
-                    target=tgt,
-                    domain=domain,
-                    target_date=target_date,
-                    rounds=rounds,
-                    provider_name=args.provider,
-                    include_synthesis=include_synthesis,
-                    session_id=args.session_id,
+    if args.rich and args.output is None and sys.stdout.isatty():
+        try:
+            results: list[DebateResult] = []
+            for tgt in targets:
+                results.append(
+                    run_debate_only(
+                        analysts=analysts,
+                        target=tgt,
+                        domain=domain,
+                        target_date=target_date,
+                        rounds=rounds,
+                        provider_name=args.provider,
+                        include_synthesis=include_synthesis,
+                        session_id=args.session_id,
+                    )
                 )
+        except RuntimeError as e:
+            _print_error_provider(e)
+            return 2
+        except (ValueError, KeyError) as e:
+            print(f"\nERROR: {e}", file=sys.stderr)
+            return 2
+        for r in results:
+            render_debate_rich(r)
+        print(f"\nDone: {len(results)} debates.", file=sys.stderr)
+        return 0
+
+    written_paths: list[Path] = []
+    try:
+        for tgt in targets:
+            run_ts = run_timestamp()
+            completed_at = datetime.now().isoformat(timespec="seconds")
+            result = run_debate_only(
+                analysts=analysts,
+                target=tgt,
+                domain=domain,
+                target_date=target_date,
+                rounds=rounds,
+                provider_name=args.provider,
+                include_synthesis=include_synthesis,
+                session_id=args.session_id,
             )
+
+            if domain == "company":
+                sector = _resolve_sector(tgt)
+            else:
+                sector = "macro"
+
+            meta: dict[str, Any] = {
+                "run_id": result.run_id,
+                "run_ts": run_ts,
+                "domain": domain,
+                "target": tgt,
+                "target_date": target_date.isoformat(),
+                "analysts": analysts,
+                "provider": args.provider,
+                "rounds": rounds,
+                "include_synthesis": include_synthesis,
+                "completed_at": completed_at,
+                "formats": [args.format],
+            }
+            if domain == "company":
+                meta["sector"] = sector
+            else:
+                meta["indicator"] = tgt
+
+            target_group = sector if domain == "company" else tgt
+
+            if args.output:
+                out_path = Path(args.output)
+                if out_path.suffix.lower() in {".md", ".txt"}:
+                    out_path.parent.mkdir(parents=True, exist_ok=True)
+                    out_path.write_text(_render_debate_md(result), encoding="utf-8")
+                    written_paths.append(out_path)
+                    print(f"Written: {out_path}", file=sys.stderr)
+                elif out_path.suffix.lower() == ".json":
+                    out_path.parent.mkdir(parents=True, exist_ok=True)
+                    payload = {
+                        "run": meta,
+                        "debates": [result.model_dump(mode="json")],
+                    }
+                    out_path.write_text(
+                        json.dumps(payload, indent=2, default=str), encoding="utf-8"
+                    )
+                    written_paths.append(out_path)
+                    print(f"Written: {out_path}", file=sys.stderr)
+                else:
+                    run_dir_path = out_path / tgt
+                    run_dir_path.mkdir(parents=True, exist_ok=True)
+                    _write_debate_tree(
+                        run_dir_path, result, meta, run_ts, args.provider,
+                        fmt=args.format,
+                    )
+                    written_paths.append(run_dir_path)
+                    print(f"Written: {run_dir_path}/  (1 debate)", file=sys.stderr)
+                continue
+
+            if args.format == "json":
+                payload = {
+                    "run": meta,
+                    "debates": [result.model_dump(mode="json")],
+                }
+                out_file = output_path(
+                    domain, target_group, tgt, run_ts, args.provider, "data", "json"
+                )
+                ensure_parent_dir(out_file).write_text(
+                    json.dumps(payload, indent=2, default=str), encoding="utf-8"
+                )
+                _write_meta_json(
+                    run_dir(domain, target_group, tgt) / f"{run_ts}_{args.provider}_meta.json",
+                    meta,
+                )
+                written_paths.append(out_file)
+                print(f"Written: {out_file}", file=sys.stderr)
+                continue
+
+            if args.format == "rich":
+                rich_file = output_path(
+                    domain, target_group, tgt, run_ts, args.provider, "rich", "txt"
+                )
+                rich_buf = _capture_rich_text(result)
+                ensure_parent_dir(rich_file).write_text(rich_buf, encoding="utf-8")
+                _write_meta_json(
+                    run_dir(domain, target_group, tgt) / f"{run_ts}_{args.provider}_meta.json",
+                    meta,
+                )
+                written_paths.append(rich_file)
+                print(f"Written: {rich_file}", file=sys.stderr)
+                continue
+
+            if args.format == "per-agent":
+                pa_dir = per_agent_dir(domain, target_group, tgt)
+                debate_md = _render_debate_md(result)
+                sections = _split_debate_per_persona(debate_md)
+                for persona_id, sec_md in sections.items():
+                    (pa_dir / f"{persona_id}.md").write_text(sec_md, encoding="utf-8")
+                summary_md = _render_debate_summary(result, meta, completed_at)
+                target_dir = run_dir(domain, target_group, tgt)
+                (target_dir / f"{run_ts}_{args.provider}_debate.md").write_text(
+                    debate_md, encoding="utf-8"
+                )
+                (target_dir / f"{run_ts}_{args.provider}_summary.md").write_text(
+                    summary_md, encoding="utf-8"
+                )
+                _write_meta_json(
+                    target_dir / f"{run_ts}_{args.provider}_meta.json", meta
+                )
+                written_paths.append(target_dir)
+                print(f"Written: {target_dir}/  (1 debate)", file=sys.stderr)
+                continue
+
+            debate_md = _render_debate_md(result)
+            summary_md = _render_debate_summary(result, meta, completed_at)
+            target_dir = run_dir(domain, target_group, tgt)
+            (target_dir / f"{run_ts}_{args.provider}_debate.md").write_text(
+                debate_md, encoding="utf-8"
+            )
+            (target_dir / f"{run_ts}_{args.provider}_summary.md").write_text(
+                summary_md, encoding="utf-8"
+            )
+            _write_meta_json(
+                target_dir / f"{run_ts}_{args.provider}_meta.json", meta
+            )
+            written_paths.append(target_dir)
+            print(f"Written: {target_dir}/  (1 debate)", file=sys.stderr)
     except RuntimeError as e:
         _print_error_provider(e)
         return 2
@@ -332,84 +558,52 @@ def _run_debate(
         print(f"\nERROR: {e}", file=sys.stderr)
         return 2
 
-    run_id = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-    completed_at = datetime.now().isoformat(timespec="seconds")
-    meta = {
-        "run_id": run_id,
-        "domain": domain,
-        "targets": [r.target for r in results],
-        "analysts": analysts,
-        "rounds": rounds,
-        "include_synthesis": include_synthesis,
-        "provider": args.provider,
-        "target_date": target_date.isoformat(),
-        "completed_at": completed_at,
-        "n_debates": len(results),
-    }
-
-    if args.format == "json":
-        payload = {
-            "run": meta,
-            "debates": [r.model_dump(mode="json") for r in results],
-        }
-        text = json.dumps(payload, indent=2, default=str)
-        if args.output:
-            Path(args.output).write_text(text, encoding="utf-8")
-            print(f"Written: {args.output}", file=sys.stderr)
-        else:
-            print(text)
-        print(f"\nDone: {len(results)} debates.", file=sys.stderr)
-        return 0
-
-    if args.rich and args.output is None and sys.stdout.isatty():
-        for r in results:
-            render_debate_rich(r)
-        print(f"\nDone: {len(results)} debates.", file=sys.stderr)
-        return 0
-
-    if args.output:
-        out_path = Path(args.output)
-        if out_path.suffix.lower() in {".md", ".txt"}:
-            out_path.parent.mkdir(parents=True, exist_ok=True)
-            parts = [_render_debate_md(r) for r in results]
-            out_path.write_text("\n---\n\n".join(parts), encoding="utf-8")
-            print(f"Written: {out_path}", file=sys.stderr)
-        elif out_path.suffix.lower() == ".json":
-            payload = {
-                "run": meta,
-                "debates": [r.model_dump(mode="json") for r in results],
-            }
-            out_path.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
-            print(f"Written: {out_path}", file=sys.stderr)
-        else:
-            run_dir_path = out_path
-            run_dir_path.mkdir(parents=True, exist_ok=True)
-            for r in results:
-                (run_dir_path / f"{r.target}.md").write_text(_render_debate_md(r), encoding="utf-8")
-            summary_lines = [f"# Debate summary — {completed_at}", ""]
-            for k, v in meta.items():
-                if isinstance(v, list):
-                    summary_lines.append(f"- **{k}:** {', '.join(map(str, v))}")
-                else:
-                    summary_lines.append(f"- **{k}:** {v}")
-            (run_dir_path / "_summary.md").write_text("\n".join(summary_lines) + "\n", encoding="utf-8")
-            print(f"Written: {run_dir_path}/  ({len(results)} debates)", file=sys.stderr)
-    else:
-        run_dir_path = Path(default_run_dir(run_id=run_id).replace("run_", "debate_"))
-        run_dir_path.mkdir(parents=True, exist_ok=True)
-        for r in results:
-            (run_dir_path / f"{r.target}.md").write_text(_render_debate_md(r), encoding="utf-8")
-        summary_lines = [f"# Debate summary — {completed_at}", ""]
-        for k, v in meta.items():
-            if isinstance(v, list):
-                summary_lines.append(f"- **{k}:** {', '.join(map(str, v))}")
-            else:
-                summary_lines.append(f"- **{k}:** {v}")
-        (run_dir_path / "_summary.md").write_text("\n".join(summary_lines) + "\n", encoding="utf-8")
-        print(f"Written: {run_dir_path}/  ({len(results)} debates)", file=sys.stderr)
-
-    print(f"\nDone: {len(results)} debates.", file=sys.stderr)
+    print(f"\nDone: {len(written_paths)} debates.", file=sys.stderr)
     return 0
+
+
+def _capture_rich_text(result: DebateResult) -> str:
+    from io import StringIO
+
+    from rich.console import Console
+
+    buf = StringIO()
+    con = Console(file=buf, force_terminal=False, color_system=None, width=120)
+    render_debate_rich(result, console=con)
+    return buf.getvalue()
+
+
+def _render_debate_summary(result: DebateResult, meta: dict[str, Any], completed_at: str) -> str:
+    lines: list[str] = [f"# Debate summary — {completed_at}", ""]
+    for k, v in meta.items():
+        if isinstance(v, list):
+            lines.append(f"- **{k}:** {', '.join(map(str, v))}")
+        else:
+            lines.append(f"- **{k}:** {v}")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def _write_debate_tree(
+    out_dir: Path,
+    result: DebateResult,
+    meta: dict[str, Any],
+    run_ts: str,
+    provider: str,
+    fmt: str,
+) -> None:
+    debate_md = _render_debate_md(result)
+    completed_at = meta.get("completed_at") or datetime.now().isoformat(timespec="seconds")
+    summary_md = _render_debate_summary(result, meta, completed_at)
+    (out_dir / f"{run_ts}_{provider}_debate.md").write_text(debate_md, encoding="utf-8")
+    (out_dir / f"{run_ts}_{provider}_summary.md").write_text(summary_md, encoding="utf-8")
+    if fmt == "per-agent":
+        sections = _split_debate_per_persona(debate_md)
+        pa_dir = out_dir / "per_agent"
+        pa_dir.mkdir(parents=True, exist_ok=True)
+        for persona_id, sec_md in sections.items():
+            (pa_dir / f"{persona_id}.md").write_text(sec_md, encoding="utf-8")
+    _write_meta_json(out_dir / f"{run_ts}_{provider}_meta.json", meta)
 
 
 def _interactive_pick(
@@ -475,10 +669,12 @@ def main(argv: list[str] | None = None) -> int:
     indicators: list[str] | None = None
     domain: str | None
     target: str | None = None
+    company_targets: list[str] = []
 
     if args.company is not None:
         domain = "company"
-        target = args.company.strip().upper()
+        company_targets = [t.strip().upper() for t in args.company.split(",") if t.strip()]
+        target = company_targets[0] if company_targets else None
         analysts_default = DEFAULT_COMPANY_ANALYSTS
     elif args.indicators is not None:
         domain = "macro"
@@ -539,7 +735,7 @@ def main(argv: list[str] | None = None) -> int:
     if domain == "macro":
         targets = indicators if indicators else [DEFAULT_INDICATOR]
     else:
-        targets = [target or "AAPL"]
+        targets = company_targets if company_targets else [target or "AAPL"]
 
     return _run_debate(args, analysts, domain, targets, target_date, rounds_eff, synth_eff)
 
