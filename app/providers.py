@@ -60,18 +60,18 @@ class MockModel:
         self._schema = schema
 
     def invoke(self, messages, config=None):
-        from app.watch.aggregator import WatchSummary
-
         user_content = messages[-1]["content"] if messages else ""
         preview = user_content[:60].replace("\n", " ")
         schema = self._schema
-        if schema is WatchSummary:
+        if schema is not None and getattr(schema, "__name__", "") == "WatchSummary":
+            from app.watch.aggregator import CyclePhase, WatchSummary
+
             return WatchSummary(
-                moat="[MOCK] deep moat widening",
-                cycle_phase="[MOCK] Capital Return phase",
-                financial_health="[MOCK] FCF margin 12%, net debt 1.2x EBITDA",
+                moat="🟢 [MOCK] deep moat widening in serviceable markets",
+                cycle_phase=CyclePhase.CAPITAL_RETURN,
+                financial_health="[MOCK] FCF margin 12%, net debt 0.39x EBITDA",
                 valuation="[MOCK] Fair at 12x P/FCF vs sector 14x",
-                risks="[MOCK] Cyclical demand | FX drag | Regulatory",
+                risks="[MOCK] Cyclical demand | FX drag | Regulatory headwinds",
             )
         if schema is not None and hasattr(schema, "model_fields"):
             from app.models import Assessment, Rebuttal, Thesis, Verdict

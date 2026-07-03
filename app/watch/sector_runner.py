@@ -11,6 +11,7 @@ from app.sectors import load_sector
 from app.watch.aggregator import aggregate_one
 from app.watch.langfuse_tracing import surveillance_trace
 from app.watch.markdown_renderer import (
+    fundamentals_dict_for_ticker,
     indicator_rows_for_ticker,
     render_company_current_md,
 )
@@ -82,7 +83,7 @@ def _process_one_ticker(
         )
         return ticker, None, None
 
-    summary = aggregate_one(provider_name, ref, ticker, sector)
+    summary = aggregate_one(provider_name, ref, ticker, sector, fundamentals=fundamentals_dict_for_ticker(ticker, specs))
     rows = indicator_rows_for_ticker(ticker, specs)
     company_yield = _company_fcf_yield(ticker)
     current_price = _current_price(ticker)

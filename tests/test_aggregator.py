@@ -34,14 +34,14 @@ def _make_ref(tmp_path: Path, ticker: str = "XOM", sector: str = "Energy") -> De
 
 def test_watch_summary_schema_valid() -> None:
     s = WatchSummary(
-        moat="deep moat",
+        moat="🟢 deep moat",
         cycle_phase="Operating Leverage",
         financial_health="FCF margin 15%",
         valuation="cheap vs sector",
         risks="cyclical demand | FX",
         providers_used="mock",
     )
-    assert s.moat == "deep moat"
+    assert s.moat == "🟢 deep moat"
     assert s.providers_used == "mock"
 
 
@@ -90,7 +90,7 @@ def test_aggregate_one_retries_on_validation_error(tmp_path: Path) -> None:
             if self.calls == 1:
                 return SimpleBad()
             return WatchSummary(
-                moat="retry success",
+                moat="🟢 retry success",
                 cycle_phase="Operating Leverage",
                 financial_health="healthy",
                 valuation="fair",
@@ -119,7 +119,7 @@ def test_aggregate_one_retries_on_validation_error(tmp_path: Path) -> None:
     try:
         ref = _make_ref(tmp_path)
         summary = aggregate_one("flaky", ref, "XOM", "Energy")
-        assert summary.moat == "retry success"
+        assert summary.moat == "🟢 retry success"
     finally:
         if saved is None:
             ProviderRegistry._providers.pop("flaky", None)
@@ -157,9 +157,11 @@ def test_aggregate_one_returns_placeholder_on_double_failure(tmp_path: Path) -> 
     try:
         ref = _make_ref(tmp_path)
         summary = aggregate_one("always_bad", ref, "XOM", "Energy")
-        assert summary.moat == "Data unavailable"
-        assert summary.cycle_phase == "Data unavailable"
-        assert summary.risks == "Data unavailable"
+        from app.watch.aggregator import CyclePhase
+
+        assert summary.moat == "🟡 Data unavailable for moat assessment"
+        assert summary.cycle_phase == CyclePhase.CAPITAL_RETURN
+        assert summary.risks == "Data unavailable for risk assessment"
         assert summary.providers_used == "always_bad"
     finally:
         ProviderRegistry._providers.pop("always_bad", None)
@@ -188,7 +190,159 @@ def test_aggregate_one_empty_debate_yields_placeholder(tmp_path: Path) -> None:
             debate_mtime=debate.stat().st_mtime,
         )
         summary = aggregate_one("mock", ref, "XOM", "Energy")
-        assert summary.moat == "Data unavailable"
+        assert summary.moat == "🟡 Data unavailable for moat assessment"
+        assert summary.providers_used == "mock"
+    finally:
+        if saved is None:
+            ProviderRegistry._providers.pop("mock", None)
+        else:
+            ProviderRegistry._providers["mock"] = saved
+
+
+def test_cycle_phase_enum_validation() -> None:
+    from app.watch.aggregator import CyclePhase, WatchSummary
+
+    s = WatchSummary(
+        moat="🟢 test",
+        cycle_phase=CyclePhase.CAPITAL_RETURN,
+        financial_health="x",
+        valuation="x",
+        risks="x",
+    )
+    assert s.cycle_phase == CyclePhase.CAPITAL_RETURN
+    assert s.cycle_phase.value == "Capital Return"
+
+
+def test_moat_validator_rejects_no_emoji() -> None:
+    from app.watch.aggregator import WatchSummary
+
+    with pytest.raises(ValueError, match="moat must start"):
+        WatchSummary(
+            moat="Strong moat, widening",
+            cycle_phase="Capital Return",
+            financial_health="x",
+            valuation="x",
+            risks="x",
+        )
+
+
+def test_moat_validator_accepts_three_emojis() -> None:
+    from app.watch.aggregator import WatchSummary
+
+    for emoji in ["🟢", "🟡", "🔴"]:
+        s = WatchSummary(
+            moat=f"{emoji} test moat",
+            cycle_phase="Capital Return",
+            financial_health="x",
+            valuation="x",
+            risks="x",
+        )
+        assert s.moat.startswith(emoji)
+
+
+def test_moat_validator_accepts_emoji_followed_by_punctuation() -> None:
+    from app.watch.aggregator import WatchSummary
+
+    s = WatchSummary(
+        moat="🟢. Test moat",
+        cycle_phase="Capital Return",
+        financial_health="x",
+        valuation="x",
+        risks="x",
+    )
+    assert s.moat == "🟢. Test moat"
+
+
+def test_fundamentals_block_in_user_message() -> None:
+    from app.watch.aggregator import _build_messages
+
+    msgs = _build_messages(
+        "XOM",
+        "Energy",
+        "# debate text",
+        fundamentals={"FCF yield": 0.064, "EV/EBITDA": None, "Price": 114.5},
+    )
+    user_msg = msgs[1]["content"]
+    assert "Fundamentals snapshot" in user_msg
+    assert "FCF yield: 6.4%" in user_msg
+    assert "EV/EBITDA: n/a" in user_msg
+    assert "Price: 114.50" in user_msg
+
+
+def test_fundamentals_block_absent_when_none() -> None:
+    from app.watch.aggregator import _build_messages
+
+    msgs = _build_messages("XOM", "Energy", "# debate", fundamentals=None)
+    user_msg = msgs[1]["content"]
+    assert "Fundamentals snapshot" not in user_msg
+
+
+def test_placeholder_summary_starts_with_emoji() -> None:
+    from app.watch.aggregator import _placeholder_summary
+
+    p = _placeholder_summary(provider_name="mock")
+    assert p.moat[0] in "🟢🟡🔴"
+    assert p.cycle_phase.value == "Capital Return"
+
+
+def test_do_not_block_present_in_system_message() -> None:
+    from app.watch.aggregator import _build_messages
+
+    msgs = _build_messages("XOM", "Energy", "# debate")
+    sys_msg = msgs[0]["content"]
+    for phrase in [
+        "DO NOT",
+        "hedge language",
+        "invent numbers",
+        "numbered lists",
+        "comment on the debate",
+        "buy/sell recommendations",
+        "disclaimers",
+        "every bullet with the company name",
+        "negation hedges",
+        "stack synonyms",
+        "filler connectors",
+        "pad with generic language",
+    ]:
+        assert phrase in sys_msg, f"Missing phrase: {phrase}"
+
+
+def test_example_block_present_in_system_message() -> None:
+    from app.watch.aggregator import _build_messages
+
+    msgs = _build_messages("XOM", "Energy", "# debate")
+    sys_msg = msgs[0]["content"]
+    assert "<example>" in sys_msg
+    assert "Capital Return" in sys_msg
+    assert "🟢" in sys_msg
+    assert "P/FCF" in sys_msg
+
+
+def test_aggregate_one_accepts_fundamentals_kwarg() -> None:
+    import inspect
+
+    from app.watch.aggregator import aggregate_one
+
+    sig = inspect.signature(aggregate_one)
+    assert "fundamentals" in sig.parameters
+
+
+def test_aggregate_one_uses_mock_provider_with_fundamentals(tmp_path: Path) -> None:
+    from app.providers import ProviderRegistry
+    from tests._mock_provider import SchemaAwareMockProvider
+
+    saved = ProviderRegistry._providers.get("mock")
+    ProviderRegistry._providers["mock"] = SchemaAwareMockProvider()
+    try:
+        ref = _make_ref(tmp_path)
+        fundamentals = {"FCF yield": 0.064, "Net Debt/EBITDA": 0.39, "Price": 114.5}
+        summary = aggregate_one(
+            "mock", ref, "XOM", "Energy", fundamentals=fundamentals
+        )
+        assert summary.moat.startswith("🟢")
+        from app.watch.aggregator import CyclePhase
+
+        assert summary.cycle_phase in CyclePhase
         assert summary.providers_used == "mock"
     finally:
         if saved is None:

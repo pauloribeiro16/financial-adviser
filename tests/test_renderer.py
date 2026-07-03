@@ -77,7 +77,7 @@ def test_render_company_current_md_has_all_sections(tmp_path: Path) -> None:
     )
     summary = WatchSummary(
         moat="\U0001f7e2\U0001f7e2\U0001f7e2 deep moat widening",
-        cycle_phase="Capital Return phase",
+        cycle_phase="Capital Return",
         financial_health="FCF margin 12%, net debt 1.0x",
         valuation="Fair at 12x P/FCF",
         risks="Cyclical demand | Regulatory",
@@ -127,8 +127,8 @@ def test_render_company_current_md_handles_no_indicator_rows(tmp_path: Path) -> 
         debate_mtime=debate.stat().st_mtime,
     )
     summary = WatchSummary(
-        moat="moat",
-        cycle_phase="phase",
+        moat="🟡 moat",
+        cycle_phase="Capital Return",
         financial_health="health",
         valuation="valuation",
         risks="risks",

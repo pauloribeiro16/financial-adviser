@@ -204,6 +204,23 @@ def indicator_rows_for_ticker(
     return rows
 
 
+def fundamentals_dict_for_ticker(
+    ticker: str,
+    specs: list[IndicatorSpec],
+) -> dict[str, float | None]:
+    """Build a {indicator_name: raw_value} dict for the aggregator prompt.
+
+    Values are the raw extracted numbers (decimals for pct/x indicators,
+    None for missing). The aggregator's ``_format_fundamentals`` handles
+    unit-aware formatting and the "n/a" fallback.
+    """
+    ctx = _build_indicator_context(ticker)
+    out: dict[str, float | None] = {}
+    for spec in specs:
+        out[spec.name] = _safe_dotted(ctx, spec.extract)
+    return out
+
+
 def _trail_rows_for_ticker(
     sector: str,
     ticker: str,
