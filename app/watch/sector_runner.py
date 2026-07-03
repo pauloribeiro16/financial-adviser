@@ -151,11 +151,25 @@ def _process_one_ticker(
     return ticker, out_path, entry
 
 
+def _resolve_ticker_pairs(sector: str, tickers: list[str] | None) -> list[tuple[str, str]]:
+    sector_pairs = SECTOR_TICKERS.get(sector, [])
+    name_by_symbol = {sym.upper(): name for sym, name in sector_pairs}
+    if tickers is None:
+        return list(sector_pairs)
+    resolved: list[tuple[str, str]] = []
+    for raw in tickers:
+        sym = raw.strip().upper()
+        if not sym:
+            continue
+        resolved.append((sym, name_by_symbol.get(sym, sym)))
+    return resolved
+
+
 def run_sector(
     sector: str,
     provider_name: str,
     output_root: Path = Path("./out/surveillance"),
-    tickers_override: list[str] | None = None,
+    tickers: list[str] | None = None,
 ) -> dict[str, Path]:
     if sector not in SECTOR_TICKERS:
         log.error("watch.sector_runner.unknown_sector", sector=sector)
@@ -166,17 +180,14 @@ def run_sector(
     sector_slug = sector.lower().replace(" ", "-")
     specs = load_sector(sector_slug)
     sector_target_yield = _sector_target_fcf_yield(sector)
-    tickers = (
-        tickers_override
-        if tickers_override is not None
-        else SECTOR_TICKERS[sector]
-    )
+    ticker_pairs = _resolve_ticker_pairs(sector, tickers)
     log.info(
         "watch.sector_runner.start",
         sector=sector,
         provider=provider_name,
-        n_tickers=len(tickers),
+        n_tickers=len(ticker_pairs),
         output_root=str(output_root),
+        tickers_override=tickers,
     )
 
     output_root.mkdir(parents=True, exist_ok=True)
@@ -202,7 +213,7 @@ def run_sector(
                     specs,
                     sector_target_yield,
                 ): ticker
-                for ticker, name in tickers
+                for ticker, name in ticker_pairs
             }
             for fut in as_completed(futures):
                 ticker = futures[fut]

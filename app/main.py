@@ -56,6 +56,36 @@ LEGACY_FORMATS = {"md", "json", "per-agent"}
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Multi-persona macro / company assessment")
+    subparsers = p.add_subparsers(dest="subcommand", required=False)
+
+    watch = subparsers.add_parser(
+        "watch",
+        help="Refresh surveillance table for a sector (S14).",
+        description="Run the S14 surveillance pipeline that aggregates "
+                    "the latest per-ticker debates into a sector "
+                    "watch-table under <output>/<sector>/<ticker>/current.md.",
+    )
+    watch.add_argument(
+        "--sector", default=None,
+        help="Sector name (e.g. Energy, Technology, Healthcare, Financial Services).",
+    )
+    watch.add_argument(
+        "--ticker", default=None,
+        help="Single ticker to refresh (requires --sector).",
+    )
+    watch.add_argument(
+        "--all", dest="all_sectors", action="store_true",
+        help="Refresh every known sector instead of one.",
+    )
+    watch.add_argument(
+        "--provider", default="mock", choices=["mock", "minimax"],
+        help="LLM provider (default: mock).",
+    )
+    watch.add_argument(
+        "--output", default=None,
+        help="Output root directory (default: ./out/surveillance).",
+    )
+
     p.add_argument("--analysts", default=None,
                    help="Comma-separated persona IDs (overrides --analysts-default / --analysts-all)")
     p.add_argument("--analysts-all", action="store_true",
@@ -666,6 +696,22 @@ def main(argv: list[str] | None = None) -> int:
     os.environ["MFL_ENV"] = args.env
     setup_logging(service="mi")
 
+    if getattr(args, "subcommand", None) == "watch":
+        from app.watch.cli import cmd_watch as _cmd_watch
+
+        output_value = getattr(args, "output", None)
+        output_root = (
+            Path(output_value) if output_value else Path("./out/surveillance")
+        )
+        rc = _cmd_watch(
+            sector=getattr(args, "sector", None),
+            ticker=getattr(args, "ticker", None),
+            all_sectors=getattr(args, "all_sectors", False),
+            provider=getattr(args, "provider", "mock"),
+            output=output_root,
+        )
+        return rc
+
     if args.indicators == "":
         print(
             "ERROR: --indicators cannot be empty. Pass at least one indicator id (e.g. 'US.FFR').",
@@ -702,6 +748,22 @@ def main(argv: list[str] | None = None) -> int:
         picked = _interactive_pick(args, domain, target, indicators, analysts_default)
         if picked is None:
             return 130
+        if picked.get("mode") == "watch":
+            from app.watch.cli import cmd_watch as _cmd_watch
+
+            output_root = Path(
+                picked.get("output")
+                or getattr(args, "output", None)
+                or "./out/surveillance"
+            )
+            ticker = picked.get("target") if picked.get("single_ticker") else None
+            return _cmd_watch(
+                sector=picked.get("sector"),
+                ticker=ticker,
+                all_sectors=picked.get("all_sectors", False),
+                provider=picked.get("provider", "mock"),
+                output=output_root,
+            )
     elif domain is None:
         legacy_analysts = _resolve_analysts(args, analysts_default)
         legacy_compatible = (

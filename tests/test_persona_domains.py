@@ -72,17 +72,21 @@ def _patch_beaupy(
     company_sector_idx: int = 0,
     ticker_idx: int = 0,
     indicator_return: list[int] | None = None,
+    mode_idx: int = 0,
+    domain_idx: int | None = None,
 ) -> None:
     """Patch beaupy.select / select_multiple to deterministic returns.
 
-    Order of beaupy.select calls in interactive_pick:
-      1. domain
-      2. (company) sector
-      3. (company) ticker
-      3. (macro)   indicators (via select_multiple)
-      4. provider
-      5. persona (select_multiple)
-    We override select to return based on call order using a counter.
+    Order of beaupy.select calls in interactive_pick (S14-P3):
+      1. mode (analyze/watch)
+      2. domain
+      3. (company) sector  |  (macro) provider
+      4. (company) ticker  |  (macro) provider
+      5. provider          |  (macro) persona
+      6. persona (select_multiple)
+
+    ``mode_idx`` defaults to 0 (analyze). ``domain_idx`` defaults to the
+    cursor_index supplied by ``interactive_pick`` (company=0 / macro=1).
     """
     select_calls: list = []
     select_multiple_calls: list = []
@@ -91,10 +95,12 @@ def _patch_beaupy(
         select_calls.append(options)
         idx = len(select_calls) - 1
         if idx == 0:
-            return kwargs.get("cursor_index", 0)
+            return mode_idx
         if idx == 1:
-            return company_sector_idx
+            return domain_idx if domain_idx is not None else kwargs.get("cursor_index", 0)
         if idx == 2:
+            return company_sector_idx
+        if idx == 3:
             return ticker_idx
         return kwargs.get("cursor_index", 0)
 
@@ -119,6 +125,8 @@ def test_cli_company_uses_filtered_personas(monkeypatch: pytest.MonkeyPatch) -> 
         persona_return=[0],
         company_sector_idx=1,
         ticker_idx=0,
+        mode_idx=0,
+        domain_idx=0,
     )
 
     defaults = {
@@ -148,6 +156,8 @@ def test_cli_macro_uses_filtered_personas(monkeypatch: pytest.MonkeyPatch) -> No
         monkeypatch,
         persona_return=[0],
         indicator_return=[0],
+        mode_idx=0,
+        domain_idx=1,
     )
 
     defaults = {

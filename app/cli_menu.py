@@ -204,13 +204,101 @@ def interactive_pick(defaults: dict[str, Any]) -> dict[str, Any]:
         - include_synthesis: bool
 
     On non-TTY stdout or any prompt failure, returns ``defaults`` unchanged.
+    Returned dict always carries a ``mode`` key ('analyze' | 'watch').
     """
     defaults = dict(defaults or {})
     if not _is_tty():
+        defaults.setdefault("mode", "analyze")
         return defaults
 
     console = Console()
     _render_welcome(console)
+
+    mode_options = [
+        "Analyze  (run a debate on a target)",
+        "Watch    (refresh surveillance table)",
+    ]
+    default_mode = str(defaults.get("mode", "analyze"))
+    mode_idx = 1 if default_mode == "watch" else 0
+    picked_idx = _safe(
+        lambda: beaupy.select(
+            mode_options,
+            cursor=">",
+            cursor_index=mode_idx,
+            pagination=False,
+            return_index=True,
+        ),
+        mode_idx,
+    )
+    mode = "watch" if picked_idx == 1 else "analyze"
+
+    if mode == "watch":
+        sector_labels = list(SECTOR_TICKERS.keys())
+        default_sector = defaults.get("sector") or next(
+            (sec for sec, tickers in SECTOR_TICKERS.items()
+             if any(sym == str(defaults.get("target") or "").upper()
+                    for sym, _ in tickers)),
+            "Energy",
+        )
+        sector_idx = (
+            sector_labels.index(default_sector)
+            if default_sector in sector_labels
+            else 0
+        )
+        picked_idx = _safe(
+            lambda: beaupy.select(
+                sector_labels,
+                cursor=">",
+                cursor_index=sector_idx,
+                pagination=False,
+                return_index=True,
+            ),
+            sector_idx,
+        )
+        picked_sector = sector_labels[picked_idx]
+
+        provider_options = [
+            "mock      (offline, no API key)",
+            "minimax   (real API, requires MINIMAX_API_KEY)",
+        ]
+        default_provider = str(defaults.get("provider", "mock"))
+        provider_idx = 0 if default_provider != "minimax" else 1
+        picked_idx = _safe(
+            lambda: beaupy.select(
+                provider_options,
+                cursor=">",
+                cursor_index=provider_idx,
+                pagination=False,
+                return_index=True,
+            ),
+            provider_idx,
+        )
+        provider = "mock" if picked_idx == 0 else "minimax"
+
+        single_yes_no = _safe(
+            lambda: beaupy.confirm(
+                f"Refresh a single ticker in {picked_sector}?",
+                default_is_yes=False,
+            ),
+            False,
+            propagate_cancel=False,
+        )
+
+        cfg = {
+            "mode": "watch",
+            "domain": "company",
+            "sector": picked_sector,
+            "all_sectors": False,
+            "single_ticker": bool(single_yes_no),
+            "target": str(defaults.get("target") or "XOM"),
+            "provider": provider,
+            "indicators": [],
+            "analysts": list(defaults.get("analysts") or []),
+            "rounds": int(defaults.get("rounds", 2)),
+            "format": "debate",
+            "include_synthesis": True,
+        }
+        return cfg
 
     domain_options = [
         "Company  (evaluate a ticker via SEC EDGAR + yfinance)",
@@ -367,6 +455,7 @@ def interactive_pick(defaults: dict[str, Any]) -> dict[str, Any]:
     include_synthesis = bool(synth)
 
     cfg = {
+        "mode": "analyze",
         "domain": domain,
         "target": target,
         "indicators": indicators,
