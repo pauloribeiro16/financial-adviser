@@ -285,3 +285,12 @@ class DebateResult(BaseModel):
     @classmethod
     def _coerce_lists(cls, v: Any) -> list[str]:
         return _coerce_str_list(v)
+
+
+class FilingSummary(BaseModel):
+    ticker: str
+    filing_date: str
+    form: str
+    business_and_market_risk: str = Field(..., max_length=500)
+    risk_factors: str = Field(..., max_length=500)
+    md_and_a: str = Field(..., max_length=500)
