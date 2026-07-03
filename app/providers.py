@@ -23,32 +23,29 @@ class MiniMaxProvider(LLMProvider):
         model: str | None = None,
         api_key: str | None = None,
         base_url: str = "https://api.minimax.io/anthropic",
+        temperature: float = 0.4,
     ):
         self.model = model or os.getenv("MINIMAX_MODEL", "MiniMax-M3")
-        self.api_key = api_key or os.getenv("MINIMAX_API_KEY", "")
+        self.api_key = api_key if api_key is not None else os.getenv("MINIMAX_API_KEY", "")
         self.base_url = base_url
+        self.temperature = temperature
         self._client: ChatAnthropic | None = None
-
-    def _require_api_key(self) -> str:
-        if not self.api_key or self.api_key.strip() == "":
-            raise ValueError(
-                "MINIMAX_API_KEY is not set. Either set the environment variable "
-                "(export MINIMAX_API_KEY=sk-...) or pass api_key=... to MiniMaxProvider. "
-                "For offline mode, use --provider mock."
-            )
-        return self.api_key
 
     def provider_name(self) -> str:
         return f"minimax:{self.model}"
 
     def get_model(self) -> ChatAnthropic:
         if self._client is None:
-            api_key = self._require_api_key()
+            if not self.api_key:
+                raise ValueError(
+                    "MINIMAX_API_KEY is not set. Set the MINIMAX_API_KEY environment "
+                    "variable (or pass api_key=...) before calling get_model()."
+                )
             self._client = ChatAnthropic(
                 model=self.model,
-                api_key=api_key,
+                api_key=self.api_key,
                 anthropic_api_url=self.base_url,
-                temperature=1.0,
+                temperature=self.temperature,
             )
         return self._client
 
@@ -89,6 +86,10 @@ class MockProvider(LLMProvider):
 
 class ProviderRegistry:
     _providers: dict[str, LLMProvider] = {}
+    _known_factories: dict[str, type[LLMProvider]] = {
+        "minimax": MiniMaxProvider,
+        "mock": MockProvider,
+    }
 
     @classmethod
     def register(cls, name: str, provider: LLMProvider) -> None:
@@ -98,14 +99,20 @@ class ProviderRegistry:
     @classmethod
     def get(cls, name: str) -> LLMProvider:
         if name not in cls._providers:
-            raise ValueError(f"Unknown provider: {name}. Available: {list(cls._providers.keys())}")
+            factory = cls._known_factories.get(name)
+            if factory is None:
+                raise ValueError(
+                    f"Unknown provider: {name}. Available: {sorted(cls._known_factories)}"
+                )
+            cls.register(name, factory())
         return cls._providers[name]
 
     @classmethod
     def list_providers(cls) -> list[str]:
-        return list(cls._providers.keys())
+        return sorted(cls._providers or cls._known_factories)
 
     @classmethod
     def initialize_defaults(cls) -> None:
-        cls.register("minimax", MiniMaxProvider())
-        cls.register("mock", MockProvider())
+        for name, factory in cls._known_factories.items():
+            if name not in cls._providers:
+                cls.register(name, factory())

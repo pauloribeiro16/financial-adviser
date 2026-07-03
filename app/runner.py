@@ -1,4 +1,7 @@
-"""Parallel runner: call (persona × indicator) assessments and return list[Assessment]."""
+"""Parallel runner: call (persona × indicator) assessments and return list[Assessment].
+
+Phase 3 — also exposes ``run_debate_only`` for the new debate pipeline.
+"""
 
 from __future__ import annotations
 
@@ -8,8 +11,9 @@ from typing import Any
 
 from app.agents import ALL_AGENTS, BaseAgent
 from app.catalog import get_target_indicators
+from app.debate.tracing import DebateTrace
 from app.logging import get_logger
-from app.models import Assessment
+from app.models import Assessment, DebateResult
 from app.providers import ProviderRegistry
 
 log = get_logger(__name__)
@@ -56,7 +60,12 @@ def run(
     agent_classes = _resolve_analysts(analysts)
     indicators = _resolve_indicators(indicators)
 
-    agents = {cls.agent_id: cls(provider_name=provider_name, langfuse_handler=langfuse_handler) for cls in agent_classes}
+    try:
+        agents = {cls.agent_id: cls(provider_name=provider_name, langfuse_handler=langfuse_handler) for cls in agent_classes}
+    except (RuntimeError, ValueError) as e:
+        msg = str(e)
+        log.error("runner.aborted_due_to_init_error", error=msg)
+        raise RuntimeError(msg) from e
     work = [(aid, ind) for aid in analysts for ind in indicators]
     pool_size = max_workers if max_workers > 0 else len(work)
     log.info(
@@ -95,3 +104,39 @@ def run(
 
     log.info("runner.complete", n_results=len(results))
     return results
+
+
+def run_debate_only(
+    *,
+    analysts: list[str],
+    target: str,
+    domain: str,
+    target_date: date | None = None,
+    rounds: int = 2,
+    provider_name: str = "mock",
+    include_synthesis: bool = True,
+    session_id: str | None = None,
+    ctx: dict[str, Any] | None = None,
+    trace: DebateTrace | None = None,
+) -> DebateResult:
+    """Debate-only entry point used by the CLI.
+
+    Delegates to ``app.debate.orchestrator.orchestrate_debate`` and supplies
+    ``date.today()`` as a default for ``target_date``. Kept here (instead of
+    in ``app.debate.orchestrator``) so the CLI import surface stays narrow.
+    """
+    from app.debate.orchestrator import orchestrate_debate
+
+    td = target_date or date.today()
+    return orchestrate_debate(
+        analysts=list(analysts),
+        target=target,
+        domain=domain,
+        target_date=td,
+        rounds=rounds,
+        provider_name=provider_name,
+        include_synthesis=include_synthesis,
+        session_id=session_id,
+        ctx=ctx,
+        trace=trace,
+    )
