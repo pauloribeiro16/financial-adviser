@@ -38,11 +38,30 @@ def _read(path: str) -> str:
 
 
 _SHARED_PILLARS_PATH = PROMPTS_DIR / "_shared" / "analysis_pillars.md"
+_SECTOR_LENS_DIR = PROMPTS_DIR / "_shared" / "sector_lenses"
+_SECTOR_LENS_MAP: dict[str, str] = {
+    "Financial Services": "financial",
+    "Technology": "technology",
+    "Healthcare": "healthcare",
+    "Energy": "energy",
+}
 
 
 def _shared_pillars_text() -> str:
     if _SHARED_PILLARS_PATH.exists():
         return _read(_SHARED_PILLARS_PATH)
+    return ""
+
+
+def _sector_lens_text(sector: str | None) -> str:
+    if not sector:
+        return ""
+    slug = _SECTOR_LENS_MAP.get(sector)
+    if not slug:
+        return ""
+    path = _SECTOR_LENS_DIR / f"{slug}.md"
+    if path.exists():
+        return path.read_text(encoding="utf-8")
     return ""
 
 
@@ -73,8 +92,12 @@ def build_thesis_messages(
     domain: str,
     target_date: date,
     context_md: str,
+    sector: str | None = None,
 ) -> list[dict[str, str]]:
     system = persona_system_prompt(persona_id, target_kind=domain)
+    lens = _sector_lens_text(sector)
+    if lens:
+        system += "\n\n---\n\n" + lens
     system += f"\n\n===\nYou are assessing {target} as of {target_date.isoformat()}.\n{_hint_for(persona_id)}\n==="
     user = (
         f"# Data context for {target}\n\n"
@@ -116,8 +139,12 @@ def build_rebuttal_messages(
     target_date: date,
     context_md: str,
     prior_theses: list[Thesis],
+    sector: str | None = None,
 ) -> list[dict[str, str]]:
     system = persona_system_prompt(persona_id, target_kind=domain)
+    lens = _sector_lens_text(sector)
+    if lens:
+        system += "\n\n---\n\n" + lens
     system += f"\n\n===\nYou are assessing {target} as of {target_date.isoformat()}.\n{_hint_for(persona_id)}\n==="
     other = "\n\n".join(_condense_thesis(t) for t in prior_theses)
     user = (
@@ -417,6 +444,7 @@ def run_debate(
     provider_name: str = "mock",
     include_synthesis: bool = True,
     callback: Any | None = None,
+    sector: str | None = None,
 ) -> DebateResult:
     log.info("debate.start", target=target, domain=domain, analysts=analysts, rounds=rounds, provider=provider_name)
     provider = ProviderRegistry.get(provider_name)
@@ -429,6 +457,7 @@ def run_debate(
         context_md=context_md,
         provider=provider,
         callback=callback,
+        sector=sector,
     )
     log.info("debate.round_complete", round=0, n=len(theses))
 
@@ -445,6 +474,7 @@ def run_debate(
             round_idx=r,
             provider=provider,
             callback=callback,
+            sector=sector,
         )
         rebuttals.extend(prior_round)
         log.info("debate.round_complete", round=r, n=len(prior_round))
@@ -474,6 +504,7 @@ def run_debate(
             rebuttals=rebuttals,
             provider=provider,
             callback=callback,
+            sector=sector,
         )
         log.info("debate.synthesis_complete", consensus=verdict.consensus.value)
 
@@ -504,6 +535,7 @@ def _run_round_theses(
     context_md: str,
     provider: LLMProvider,
     callback: Any | None = None,
+    sector: str | None = None,
 ) -> list[Thesis]:
     out: list[Thesis] = []
     with ThreadPoolExecutor(max_workers=max(1, len(analysts))) as ex:
@@ -512,7 +544,7 @@ def _run_round_theses(
                 _invoke_with_fallback,
                 provider,
                 Thesis,
-                build_thesis_messages(a, target, domain, target_date, context_md),
+                build_thesis_messages(a, target, domain, target_date, context_md, sector=sector),
                 callback,
             ): a
             for a in analysts
@@ -543,6 +575,7 @@ def _run_round_rebuttals(
     round_idx: int,
     provider: LLMProvider,
     callback: Any | None = None,
+    sector: str | None = None,
 ) -> list[Rebuttal]:
     out: list[Rebuttal] = []
     with ThreadPoolExecutor(max_workers=max(1, len(analysts))) as ex:
@@ -552,7 +585,7 @@ def _run_round_rebuttals(
                 provider,
                 Rebuttal,
                 build_rebuttal_messages(
-                    a, target, domain, target_date, context_md, prior_theses,
+                    a, target, domain, target_date, context_md, prior_theses, sector=sector,
                 ),
                 callback,
             ): a
@@ -583,6 +616,7 @@ def _run_synthesis(
     rebuttals: list[Rebuttal],
     provider: LLMProvider,
     callback: Any | None = None,
+    sector: str | None = None,
 ) -> Verdict:
     msgs = build_verdict_messages(target, domain, target_date, context_md, theses, rebuttals)
     counts = _tally(theses, rebuttals)

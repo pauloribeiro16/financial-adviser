@@ -211,6 +211,10 @@ def orchestrate_debate(
     if trace is None:
         trace = DebateTrace()
 
+    sector: str | None = None
+    if domain == "company":
+        sector = (ctx.get("quote") or {}).get("sector")
+
     with trace.attributes(
         session_id=session_id,
         tags=[f"domain:{domain}", f"target:{target}"] + [f"analyst:{a}" for a in analysts],
@@ -219,6 +223,7 @@ def orchestrate_debate(
             "rounds": rounds,
             "include_synthesis": include_synthesis,
             "provider": provider_name,
+            "sector": sector,
         },
         name=f"debate.{domain}.{target}",
     ):
@@ -232,6 +237,7 @@ def orchestrate_debate(
             provider_name=provider_name,
             include_synthesis=include_synthesis,
             callback=trace.callback,
+            sector=sector,
         )
 
     log.info(
