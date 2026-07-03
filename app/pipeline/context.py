@@ -94,7 +94,7 @@ def build_company_context(ticker: str) -> dict[str, Any]:
 
     news_items = news.fetch_recent_news(ticker)
     cik = (edgar_packet or {}).get("cik")
-    events = news.fetch_material_events(cik, ticker=ticker) if cik else []
+    events = edgar.fetch_material_events(cik, ticker=ticker) if cik else []
 
     return {
         "ticker": ticker,
@@ -221,13 +221,14 @@ def _render_company(ctx: dict[str, Any]) -> str:
 
     news_items = ctx.get("news") or []
     if news_items:
-        sections.append("\n## Recent news (yfinance)")
+        sections.append("\n## Recent market sentiment (yfinance, top 5)")
         for item in news_items:
             date = (item.get("date") or "").strip() or "?"
             title = (item.get("title") or "").strip() or "(untitled)"
             pub = (item.get("publisher") or "").strip()
             link = (item.get("link") or "").strip()
             related = item.get("related_tickers") or []
+            summary = (item.get("summary") or "").strip()
             tail = f"  _(related: {', '.join(related)})_" if related else ""
             if pub and link:
                 line = f"- **{date}** — {title} — [{pub}]({link}){tail}"
@@ -236,15 +237,25 @@ def _render_company(ctx: dict[str, Any]) -> str:
             else:
                 line = f"- **{date}** — {title}{tail}"
             sections.append(line)
+            if summary:
+                sections.append(f"  > {summary}")
 
     events = ctx.get("material_events") or []
     if events:
         cik = (edgar or {}).get("cik") or ""
-        sections.append("\n## Material events (SEC 8-K)")
+        sections.append("\n## Material events (SEC 8-K, impact-ranked, last 24 months)")
         for ev in events:
-            date = (ev.get("date") or "").strip() or "?"
+            tier = ev.get("tier", 3)
+            tier_label = {
+                1: "TIER 1 (transformational)",
+                2: "TIER 2 (significant)",
+                3: "TIER 3 (routine)",
+            }.get(tier, "TIER ?")
+            codes = (ev.get("items") or "").strip()
+            descs = [d for d in (ev.get("item_descriptions") or []) if d]
+            desc_text = "; ".join(descs) if descs else "(no description)"
             acc = (ev.get("accession") or "").strip()
-            code = (ev.get("items") or "").strip() or "n/a"
+            date = (ev.get("date") or "").strip() or "?"
             doc = (ev.get("primary_document") or "").strip()
             if acc and cik:
                 acc_clean = acc.replace("-", "")
@@ -255,7 +266,10 @@ def _render_company(ctx: dict[str, Any]) -> str:
                 acc_label = f"[{acc}]({filing_url})"
             else:
                 acc_label = acc or "?"
-            sections.append(f"- **{date}** — 8-K (items: {code}) — accession {acc_label}")
+            line = f"- **{date}** — 8-K [{codes}] {desc_text} — {tier_label}"
+            if acc:
+                line += f" — accession {acc_label}"
+            sections.append(line)
 
     metrics = derive_metrics(fundamentals, quote, edgar.get("facts"))
     if metrics:

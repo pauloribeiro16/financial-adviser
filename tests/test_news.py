@@ -154,10 +154,13 @@ def test_fetch_material_events_filters_non_8k() -> None:
     with patch("app.pipeline.edgar.company_submissions", return_value=fake_submissions):
         events = news.fetch_material_events("0000789019", "MSFT")
     forms_seen = [ev["accession"] for ev in events]
-    assert forms_seen == ["0001-8K1", "0001-8KA", "0001-8K2"]
-    assert events[0]["items"] == "5.02"
-    assert events[1]["items"] == "2.01,5.02"
+    assert forms_seen == ["0001-8KA", "0001-8K1", "0001-8K2"]
+    assert events[0]["items"] == "2.01, 5.02"
+    assert events[1]["items"] == "5.02"
     assert events[2]["items"] == "7.01"
+    assert events[0]["tier"] == 1
+    assert events[1]["tier"] == 1
+    assert events[2]["tier"] == 3
 
 
 def test_fetch_material_events_handles_missing_items() -> None:
@@ -192,8 +195,8 @@ def test_rendered_context_includes_news_sections() -> None:
     assert "news" in ctx, "ctx missing 'news' key"
     assert "material_events" in ctx, "ctx missing 'material_events' key"
     md = render_context_markdown(ctx, "company")
-    assert "## Recent news" in md, "Recent news section missing in render"
-    assert "## Material events" in md, "Material events section missing in render"
+    assert "## Recent market sentiment" in md, "Recent market sentiment section missing in render"
+    assert "## Material events (SEC 8-K, impact-ranked" in md, "Material events section missing in render"
 
 
 def test_rendered_news_section_lists_titles() -> None:
@@ -203,7 +206,7 @@ def test_rendered_news_section_lists_titles() -> None:
     md = render_context_markdown(ctx, "company")
     assert "Sample headline about MSFT earnings" in md
     assert "Yahoo Finance" in md
-    news_block = md.split("## Recent news", 1)[1].split("## ", 1)[0]
+    news_block = md.split("## Recent market sentiment", 1)[1].split("## ", 1)[0]
     assert news_block.count("- **") >= 2
 
 
@@ -222,7 +225,7 @@ def test_rendered_material_events_lists_items() -> None:
     with patch("app.pipeline.edgar.company_submissions", return_value=fake_submissions):
         ctx = build_company_context(MSFT_TICKER)
     md = render_context_markdown(ctx, "company")
-    assert "8-K (items: 2.02)" in md
+    assert "8-K [2.02]" in md
     assert "0001-8K-FAKE" in md
     assert "https://www.sec.gov/Archives/edgar/data/" in md
 
