@@ -1,0 +1,57 @@
+sector: Technology
+indicators:
+  - id: revenue_growth_yoy
+    name: "Revenue Growth YoY %"
+    extract: "fundamentals.revenue_growth_yoy"
+    healthier_is: higher
+    healthy_threshold: 0.10
+    warning_threshold: 0.03
+    unit: "pct"
+
+  - id: gross_margin
+    name: "Gross Margin"
+    extract: "fundamentals.gross_margin"
+    healthier_is: higher
+    healthy_threshold: 0.55
+    warning_threshold: 0.40
+    unit: "pct"
+
+  - id: fcf_margin
+    name: "FCF Margin"
+    extract: "fundamentals.fcf_margin"
+    healthier_is: higher
+    healthy_threshold: 0.20
+    warning_threshold: 0.10
+    unit: "pct"
+
+  - id: rd_pct_revenue
+    name: "R&D / Revenue"
+    extract: "fundamentals.rd_pct_revenue"
+    healthier_is: mid
+    healthy_threshold: 0.15
+    warning_threshold: 0.07
+    unit: "pct"
+
+  - id: net_retention
+    name: "Net Revenue Retention"
+    extract: "fundamentals.net_retention"
+    healthier_is: higher
+    healthy_threshold: 1.10
+    warning_threshold: 1.00
+    unit: "x"
+
+  - id: capex_revenue
+    name: "Capex / Revenue"
+    extract: "fundamentals.capex_revenue"
+    healthier_is: lower
+    healthy_threshold: 0.12
+    warning_threshold: 0.20
+    unit: "pct"
+
+  - id: operating_leverage
+    name: "Operating Leverage (OpInc growth / Rev growth)"
+    extract: "fundamentals.operating_leverage"
+    healthier_is: higher
+    healthy_threshold: 1.20
+    warning_threshold: 0.80
+    unit: "x"
