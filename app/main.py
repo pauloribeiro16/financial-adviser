@@ -1,4 +1,4 @@
-"""CLI entry: `python -m app.main --analysts buffett,burry --provider mock`.
+"""CLI entry: `python3 -m app.main --analysts buffett,burry --provider mock`.
 
 Phase 3 — supports both legacy single-indicator runs and the new debate
 pipeline. Dispatch rule:
@@ -7,8 +7,7 @@ pipeline. Dispatch rule:
                      indicator AND no explicit ``--rounds > 1`` AND no
                      ``--no-synthesis`` AND ``--format`` in {md,json,per-agent}.
     debate mode  ←→  everything else (``--company``, multi-analyst, multi-
-                     indicator, ``--rounds>1``, ``--format debate``,
-                     ``--interactive``, …).
+                     indicator, ``--rounds>1``, ``--interactive``, …).
 """
 
 from __future__ import annotations
@@ -73,9 +72,9 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                    help="Target date YYYY-MM-DD (default: today)")
     p.add_argument("--target-date", dest="target_date", default=None,
                    help="Alias for --date")
-    p.add_argument("--format", default="debate", choices=["md", "json", "per-agent", "debate"],
-                   help="Output format (default: debate). Legacy formats (md/json/per-agent) "
-                        "trigger the legacy runner when conditions match.")
+    p.add_argument("--format", default=None, choices=["md", "json", "per-agent"],
+                   help="Output format for legacy runner (single analyst + single indicator, no rounds). "
+                        "Leave unset for debate mode (default for --company or multi-round runs).")
     p.add_argument("--output", default=None,
                    help="Write output to file/dir (legacy: per-agent→./out/run_<TS>/, md→./out/run_<TS>.md, "
                         "json→stdout; debate→./out/debate_<TS>/ or --output PATH).")
@@ -130,8 +129,6 @@ def _decide_mode(
         return "debate", rounds if rounds is not None else 2, include_synthesis
     if domain == "company":
         return "debate", rounds if rounds is not None else 2, include_synthesis
-    if args.format == "debate":
-        return "debate", rounds if rounds is not None else 2, include_synthesis
     if not include_synthesis:
         return "debate", rounds if rounds is not None else 2, include_synthesis
     if rounds is not None and rounds > 1:
@@ -140,6 +137,8 @@ def _decide_mode(
         return "debate", rounds if rounds is not None else 2, include_synthesis
     if indicators is not None and len(indicators) > 1:
         return "debate", rounds if rounds is not None else 2, include_synthesis
+    if args.format is not None:
+        return "legacy", 1, True
     if domain == "macro":
         return "legacy", 1, True
     return "debate", rounds if rounds is not None else 2, include_synthesis
@@ -404,7 +403,6 @@ def _run_debate(
                         provider_name=args.provider,
                         include_synthesis=include_synthesis,
                         session_id=args.session_id,
-                        output_format=args.format,
                     )
                 )
         except RuntimeError as e:
@@ -432,7 +430,6 @@ def _run_debate(
                 provider_name=args.provider,
                 include_synthesis=include_synthesis,
                 session_id=args.session_id,
-                output_format=args.format,
             )
 
             if domain == "company":

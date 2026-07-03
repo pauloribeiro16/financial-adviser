@@ -118,17 +118,12 @@ def run_debate_only(
     session_id: str | None = None,
     ctx: dict[str, Any] | None = None,
     trace: DebateTrace | None = None,
-    output_format: str | None = None,
 ) -> DebateResult:
     """Debate-only entry point used by the CLI.
 
     Delegates to ``app.debate.orchestrator.orchestrate_debate`` and supplies
     ``date.today()`` as a default for ``target_date``. Kept here (instead of
     in ``app.debate.orchestrator``) so the CLI import surface stays narrow.
-
-    ``output_format`` is forwarded to the orchestrator so the
-    graph-vs-engine routing decision can consider ``--format debate``
-    (default in CLI) even when ``rounds == 1``.
     """
     from app.debate.orchestrator import orchestrate_debate
 
@@ -144,5 +139,4 @@ def run_debate_only(
         session_id=session_id,
         ctx=ctx,
         trace=trace,
-        output_format=output_format,
     )
