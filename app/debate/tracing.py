@@ -5,8 +5,10 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any
 
+from langchain_core.callbacks import BaseCallbackHandler
 
-class _NoopHandler:
+
+class _NoopHandler(BaseCallbackHandler):
     def __repr__(self) -> str:
         return "<NoopHandler>"
 

@@ -386,6 +386,10 @@ def _run_debate(
     rounds: int,
     include_synthesis: bool,
 ) -> int:
+    if not args.session_id and targets:
+        args.session_id = _auto_session_id(domain, targets[0])
+        print(f"session_id: {args.session_id}", file=sys.stderr)
+
     if args.rich and args.output is None and sys.stdout.isatty():
         try:
             results: list[DebateResult] = []
@@ -400,6 +404,7 @@ def _run_debate(
                         provider_name=args.provider,
                         include_synthesis=include_synthesis,
                         session_id=args.session_id,
+                        output_format=args.format,
                     )
                 )
         except RuntimeError as e:
@@ -427,6 +432,7 @@ def _run_debate(
                 provider_name=args.provider,
                 include_synthesis=include_synthesis,
                 session_id=args.session_id,
+                output_format=args.format,
             )
 
             if domain == "company":
@@ -560,6 +566,10 @@ def _run_debate(
 
     print(f"\nDone: {len(written_paths)} debates.", file=sys.stderr)
     return 0
+
+
+def _auto_session_id(domain: str, target: str) -> str:
+    return f"debate-{domain}-{target}-{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
 
 def _capture_rich_text(result: DebateResult) -> str:
