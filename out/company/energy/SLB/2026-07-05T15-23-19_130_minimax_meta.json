@@ -1,0 +1,23 @@
+{
+  "run_id": "debate_20260705_152709_879159",
+  "run_ts": "2026-07-05T15-23-19_130",
+  "domain": "company",
+  "target": "SLB",
+  "target_date": "2026-07-05",
+  "analysts": [
+    "dalio",
+    "gundlach",
+    "burry",
+    "eisman",
+    "grantham",
+    "thaler"
+  ],
+  "provider": "minimax",
+  "rounds": 2,
+  "include_synthesis": true,
+  "completed_at": "2026-07-05T15:23:19",
+  "formats": [
+    "debate"
+  ],
+  "sector": "Energy"
+}

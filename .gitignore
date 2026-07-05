@@ -13,7 +13,11 @@ data/*
 !data/.gitkeep
 !data/
 
-out/
+# out/ is now versioned (debates, per-agent snapshots, summaries, meta, 10-K summaries).
+# Raw 10-K HTMLs and binary intermediates are still excluded.
+out/**/raw/**
+out/**/*.htm
+out/**/raw_*.htm
 
 
 .ruff_cache/

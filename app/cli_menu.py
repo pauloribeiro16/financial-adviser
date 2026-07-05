@@ -11,9 +11,12 @@ is a ``beaupy.select`` (single) or ``beaupy.select_multiple``:
     4.  Provider (mock / minimax).
     5.  Personas (multi-select with display names).
     6.  Rounds (1..10, single select).
-    7.  Output format.
-    8.  Synthesis (yes / no).
-    9.  Confirmation summary; user can confirm or abort.
+    7.  Synthesis (yes / no).
+    8.  Confirmation summary; user can confirm or abort.
+
+S17 — the "Output format" choice was removed. Every debate always writes
+the full set of files (debate.md, data.json, summary.md, meta.json, plus
+per_agent/<persona>.md).
 
 If stdout is not a TTY (or beaupy raises for any reason), the function
 returns the caller-provided ``defaults`` unchanged so the CLI keeps
@@ -39,7 +42,6 @@ log = get_logger(__name__)
 DEFAULT_COMPANY_ANALYSTS: list[str] = ["buffett", "lynch", "burry", "taleb"]
 DEFAULT_MACRO_ANALYSTS: list[str] = ["dalio", "gundlach", "volcker", "greenspan"]
 DEFAULT_INDICATORS: list[str] = ["US.FFR", "US.CPI.YOY"]
-FORMATS: list[str] = ["debate", "md", "json", "per-agent"]
 
 SECTOR_DEFAULT_ANALYSTS: dict[str, list[str]] = {
     "Financial Services": ["buffett", "lynch", "burry", "dimon"],
@@ -127,7 +129,7 @@ def _render_welcome(console: Console) -> None:
     table.add_row("Goal", "Multi-persona investment debate")
     table.add_row("Domain", "company (ticker)  |  macro (FRED)")
     table.add_row("Engine", "LangChain + Langfuse  |  no DB, no UI")
-    table.add_row("Output", "Markdown, JSON, per-agent, or rich table")
+    table.add_row("Output", "Debate MD + JSON + summary + per-agent files")
     console.print()
     console.print(Panel(
         table,
@@ -182,7 +184,6 @@ def _render_summary(console: Console, cfg: dict[str, Any]) -> None:
     table.add_row("Provider",  cfg["provider"])
     table.add_row("Personas",  personas)
     table.add_row("Rounds",    str(cfg["rounds"]))
-    table.add_row("Format",    cfg["format"])
     table.add_row("Synthesis", "yes" if cfg["include_synthesis"] else "no")
     console.print()
     console.print(Panel(table, title="[bold yellow]Confirm configuration[/]", border_style="yellow"))
@@ -200,8 +201,10 @@ def interactive_pick(defaults: dict[str, Any]) -> dict[str, Any]:
         - provider: 'mock' | 'minimax'
         - analysts: list[str]
         - rounds: int
-        - format: 'per-agent' | 'md' | 'json' | 'debate'
         - include_synthesis: bool
+
+    S17 — ``format`` was removed from the menu and from the returned dict.
+    Every debate now always writes the full file set.
 
     On non-TTY stdout or any prompt failure, returns ``defaults`` unchanged.
     Returned dict always carries a ``mode`` key ('analyze' | 'watch').
@@ -295,7 +298,6 @@ def interactive_pick(defaults: dict[str, Any]) -> dict[str, Any]:
             "indicators": [],
             "analysts": list(defaults.get("analysts") or []),
             "rounds": int(defaults.get("rounds", 2)),
-            "format": "debate",
             "include_synthesis": True,
         }
         return cfg
@@ -433,20 +435,6 @@ def interactive_pick(defaults: dict[str, Any]) -> dict[str, Any]:
     )
     rounds = picked_idx + 1
 
-    format_options = [
-        "debate      (Markdown, round-by-round + synthesis)",
-        "md          (single Markdown file)",
-        "json        (structured JSON)",
-        "per-agent   (one file per persona)",
-    ]
-    default_format = defaults.get("format", "debate")
-    fmt_idx = FORMATS.index(default_format) if default_format in FORMATS else 0
-    picked_idx = _safe(
-        lambda: beaupy.select(format_options, cursor=">", cursor_index=fmt_idx, pagination=False, return_index=True),
-        fmt_idx,
-    )
-    fmt = FORMATS[picked_idx]
-
     synth_default = bool(defaults.get("include_synthesis", True))
     synth = _safe(
         lambda: beaupy.confirm("Include synthesis (moderator verdict)?", default_is_yes=synth_default),
@@ -471,7 +459,6 @@ def interactive_pick(defaults: dict[str, Any]) -> dict[str, Any]:
         "provider": provider,
         "analysts": analysts,
         "rounds": rounds,
-        "format": fmt,
         "include_synthesis": include_synthesis,
         "with_filings": include_filings,
     }

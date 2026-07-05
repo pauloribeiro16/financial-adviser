@@ -107,7 +107,6 @@ def test_e2e_company_debate_writes_to_new_structure(
         "--company", "AAPL",
         "--analysts", "buffett",
         "--provider", "mock",
-        "--format", "debate",
         "--no-synthesis",
         "--rounds", "1",
         "--env", "development",
@@ -116,14 +115,17 @@ def test_e2e_company_debate_writes_to_new_structure(
     assert result.returncode == 0, f"stderr: {result.stderr}\nstdout: {result.stdout}"
     base = tmp_path / "out" / "company" / "technology" / "AAPL"
     assert base.is_dir(), f"missing dir; tree: {list((tmp_path / 'out').rglob('*'))}"
-    md_files = sorted(base.glob("*_mock_debate.md"))
+    run_subdirs = [p for p in base.iterdir() if p.is_dir()]
+    assert len(run_subdirs) == 1, f"expected one run subdir, got: {run_subdirs}"
+    run_subdir = run_subdirs[0]
+    md_files = sorted(run_subdir.glob("*_mock_debate.md"))
     assert len(md_files) == 1
     assert "Round 0" in md_files[0].read_text(encoding="utf-8")
-    meta_files = sorted(base.glob("*_mock_meta.json"))
+    meta_files = sorted(run_subdir.glob("*_mock_meta.json"))
     assert len(meta_files) == 1
     meta = json.loads(meta_files[0].read_text(encoding="utf-8"))
     for k in ("run_id", "analysts", "provider", "target", "target_date",
-              "domain", "rounds", "formats"):
+              "domain", "rounds"):
         assert k in meta, f"missing key {k} in meta.json"
     assert meta["sector"] == "Technology"
     assert meta["domain"] == "company"
@@ -138,7 +140,6 @@ def test_e2e_macro_debate_writes_to_new_structure(
         "--indicators", "US.FFR",
         "--analysts", "dalio",
         "--provider", "mock",
-        "--format", "debate",
         "--no-synthesis",
         "--rounds", "1",
         "--env", "development",
@@ -161,7 +162,6 @@ def test_e2e_multi_target(
         "--company", "JPM,BAC",
         "--analysts", "buffett",
         "--provider", "mock",
-        "--format", "debate",
         "--no-synthesis",
         "--rounds", "1",
         "--env", "development",
@@ -173,8 +173,10 @@ def test_e2e_multi_target(
     bac_dir = base / "BAC"
     assert jpm_dir.is_dir(), f"missing JPM dir; tree: {sorted(base.rglob('*'))}"
     assert bac_dir.is_dir(), f"missing BAC dir; tree: {sorted(base.rglob('*'))}"
-    assert list(jpm_dir.glob("*_mock_debate.md"))
-    assert list(bac_dir.glob("*_mock_debate.md"))
+    jpm_subdirs = [p for p in jpm_dir.iterdir() if p.is_dir()]
+    bac_subdirs = [p for p in bac_dir.iterdir() if p.is_dir()]
+    assert jpm_subdirs and list(jpm_subdirs[0].glob("*_mock_debate.md"))
+    assert bac_subdirs and list(bac_subdirs[0].glob("*_mock_debate.md"))
 
 
 def test_explicit_output_bypasses_new_structure(
@@ -186,7 +188,6 @@ def test_explicit_output_bypasses_new_structure(
         "--company", "AAPL",
         "--analysts", "buffett",
         "--provider", "mock",
-        "--format", "debate",
         "--no-synthesis",
         "--rounds", "1",
         "--output", str(out_file),
@@ -207,7 +208,6 @@ def test_meta_json_complete_keys(
         "--company", "AAPL",
         "--analysts", "buffett,taleb",
         "--provider", "mock",
-        "--format", "debate",
         "--no-synthesis",
         "--rounds", "1",
         "--env", "development",
@@ -215,12 +215,14 @@ def test_meta_json_complete_keys(
     )
     assert result.returncode == 0, f"stderr: {result.stderr}"
     base = tmp_path / "out" / "company" / "technology" / "AAPL"
-    meta_files = sorted(base.glob("*_mock_meta.json"))
-    assert meta_files, f"missing meta.json; tree: {sorted(base.rglob('*'))}"
+    run_subdirs = [p for p in base.iterdir() if p.is_dir()]
+    assert run_subdirs, f"missing run subdir; tree: {sorted(base.rglob('*'))}"
+    meta_files = sorted(run_subdirs[0].glob("*_mock_meta.json"))
+    assert meta_files, f"missing meta.json; tree: {sorted(run_subdirs[0].rglob('*'))}"
     meta = json.loads(meta_files[0].read_text(encoding="utf-8"))
     required = {
         "run_id", "analysts", "provider", "target", "target_date",
-        "domain", "rounds", "formats", "completed_at",
+        "domain", "rounds", "completed_at",
     }
     missing = required - meta.keys()
     assert not missing, f"missing keys: {missing}"
@@ -268,7 +270,6 @@ def test_per_agent_writes_subdirectory(
         "--company", "AAPL",
         "--analysts", "buffett,taleb",
         "--provider", "mock",
-        "--format", "per-agent",
         "--no-synthesis",
         "--rounds", "1",
         "--env", "development",
@@ -276,13 +277,15 @@ def test_per_agent_writes_subdirectory(
     )
     assert result.returncode == 0, f"stderr: {result.stderr}\nstdout: {result.stdout}"
     base = tmp_path / "out" / "company" / "technology" / "AAPL"
-    pa_dir = base / "per_agent"
-    assert pa_dir.is_dir(), f"missing per_agent dir; tree: {sorted(base.rglob('*'))}"
+    run_subdirs = [p for p in base.iterdir() if p.is_dir()]
+    assert run_subdirs, f"missing run subdir; tree: {sorted(base.rglob('*'))}"
+    pa_dir = run_subdirs[0] / "per_agent"
+    assert pa_dir.is_dir(), f"missing per_agent dir; tree: {sorted(run_subdirs[0].rglob('*'))}"
     persona_files = sorted(pa_dir.glob("*.md"))
     assert persona_files, f"no per-persona files in {pa_dir}"
     assert any("buffett" in p.name for p in persona_files)
     assert any("taleb" in p.name for p in persona_files)
-    md_files = list(base.glob("*_mock_debate.md"))
+    md_files = list(run_subdirs[0].glob("*_mock_debate.md"))
     assert md_files
 
 
@@ -294,7 +297,6 @@ def test_provider_slug_in_filename(
         "--indicators", "US.FFR",
         "--analysts", "dalio",
         "--provider", "mock",
-        "--format", "json",
         "--no-synthesis",
         "--rounds", "1",
         "--env", "development",

@@ -30,7 +30,6 @@ def test_cli_company_debate_with_mock(tmp_path: Path) -> None:
         "--analysts", "buffett,taleb",
         "--provider", "mock",
         "--rounds", "1",
-        "--format", "debate",
         "--output", str(output),
         "--env", "development",
     )
@@ -59,7 +58,6 @@ def test_cli_macro_default_single_indicator(tmp_path: Path) -> None:
     result = _run_cli(
         "--analysts", "buffett",
         "--provider", "mock",
-        "--format", "md",
         "--output", str(output),
         "--env", "development",
     )

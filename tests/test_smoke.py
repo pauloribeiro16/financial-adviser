@@ -125,7 +125,6 @@ def test_cli_end_to_end_with_mock(tmp_path: Path) -> None:
             "--analysts", "buffett",
             "--indicators", "US.FFR",
             "--provider", "mock",
-            "--format", "md",
             "--output", str(output),
             "--env", "development",
         ],
@@ -174,7 +173,6 @@ def test_cli_exits_2_when_api_key_missing(tmp_path: Path) -> None:
             "--analysts", "buffett",
             "--indicators", "US.FFR",
             "--provider", "minimax",
-            "--format", "md",
             "--output", str(output),
             "--env", "development",
         ],
@@ -247,7 +245,6 @@ def test_default_single_indicator(tmp_path: Path) -> None:
             sys.executable, "-m", "app.main",
             "--analysts", "buffett",
             "--provider", "mock",
-            "--format", "per-agent",
             "--output", str(output_dir),
             "--env", "development",
         ],
@@ -259,4 +256,6 @@ def test_default_single_indicator(tmp_path: Path) -> None:
     assert result.returncode == 0, f"stderr: {result.stderr}"
     files = sorted(output_dir.rglob("*.md"))
     paths = {p.relative_to(output_dir).as_posix() for p in files}
-    assert paths == {"_summary.md", "buffett/US.UST10Y.md"}, paths
+    assert any(p.endswith("_assessment.md") for p in paths), paths
+    assert any(p.endswith("_summary.md") for p in paths), paths
+    assert any("per_agent/buffett_US.UST10Y" in p for p in paths), paths
