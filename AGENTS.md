@@ -49,6 +49,7 @@ financial-adviser/
 8. **Langfuse tracing is optional for legacy agents.** When `LANGFUSE_PUBLIC_KEY` is set in env, an agent attaches a `CallbackHandler`.
 9. **Debate traces** — `run_debate` (via `app/debate/orchestrator.py`) emits one root Langfuse trace per debate with `session_id` + nested spans per round (`data-ingest`, `round-N-theses`, `synthesis`). Without Langfuse env vars the trace becomes a no-op and the runner still works offline.
 10. **Ruff** for lint. Line length 100. Run `ruff check app/ tests/` before committing.
+11. **Never delete or overwrite files in `out/` during implementation — use `git mv` to relocate, never `rm`.**
 
 ## Code Style
 

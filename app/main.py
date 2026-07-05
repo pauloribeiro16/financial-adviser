@@ -504,6 +504,8 @@ def _run_debate(
             _write_debate_tree(run_subdir, result, meta, run_ts, args.provider)
             written_paths.append(run_subdir)
             print(f"Written: {run_subdir}/  (1 debate)", file=sys.stderr)
+            if args.provider != "mock":
+                _auto_commit_and_push(run_ts, tgt, args.provider, run_subdir)
     except RuntimeError as e:
         _print_error_provider(e)
         return 2
@@ -611,6 +613,56 @@ def _write_legacy_tree(
                 md_content, encoding="utf-8"
             )
     _write_meta_json(out_dir / f"{run_ts}_{provider}_meta.json", meta)
+
+
+def _auto_commit_and_push(run_ts: str, target: str, provider: str, run_dir: Path) -> None:
+    """Auto-commit and push a real-provider analysis to origin/master.
+
+    Skips silently on any error so the debate run is never blocked by git
+    failures. Logs warnings on failure.
+    """
+    import subprocess
+
+    from app.logging import get_logger
+
+    log = get_logger(__name__)
+    try:
+        rel_path = run_dir.relative_to(Path.cwd())
+    except ValueError:
+        rel_path = run_dir
+    try:
+        subprocess.run(
+            ["git", "add", str(rel_path)],
+            check=True, capture_output=True, timeout=10,
+        )
+        diff_r = subprocess.run(
+            ["git", "diff", "--cached", "--name-only"],
+            check=True, capture_output=True, timeout=5, text=True,
+        )
+        if not diff_r.stdout.strip():
+            log.info("auto_commit.nothing_to_commit", target=target, provider=provider)
+            return
+        subprocess.run(
+            ["git", "commit", "-m", f"analysis: {run_ts} {target} {provider}"],
+            check=True, capture_output=True, timeout=15,
+        )
+        subprocess.run(
+            ["git", "push", "origin", "master"],
+            check=True, capture_output=True, timeout=30,
+        )
+        log.info("auto_commit.pushed", target=target, provider=provider, run_ts=run_ts)
+    except subprocess.CalledProcessError as e:
+        log.warning(
+            "auto_commit.failed",
+            target=target,
+            provider=provider,
+            error=str(e)[:200],
+            stderr=e.stderr.decode()[:200] if e.stderr else "",
+        )
+    except subprocess.TimeoutExpired as e:
+        log.warning("auto_commit.timeout", target=target, provider=provider, error=str(e))
+    except FileNotFoundError:
+        log.warning("auto_commit.git_not_found")
 
 
 def _interactive_pick(
