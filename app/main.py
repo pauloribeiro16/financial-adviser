@@ -692,6 +692,7 @@ def _interactive_pick(
         "rounds": int(picked["rounds"]),
         "include_synthesis": bool(picked["include_synthesis"]),
         "analysts": [str(a) for a in picked["analysts"]],
+        "with_filings": bool(picked.get("with_filings", False)),
     }
 
 
@@ -701,6 +702,8 @@ def _apply_pick(args: argparse.Namespace, picked: dict[str, Any]) -> None:
     args.format = picked["format"]
     args.rounds = picked["rounds"]
     args.no_synthesis = not picked["include_synthesis"]
+    if getattr(args, "with_filings", None) is not True:
+        args.with_filings = bool(picked.get("with_filings", False))
 
 
 def main(argv: list[str] | None = None) -> int:
