@@ -5,6 +5,7 @@ from typing import Any
 
 from app.models import Assessment, Consensus, Direction, Domain, Rebuttal, Thesis, Verdict
 from app.providers import LLMProvider
+from app.watch.aggregator import CyclePhase, WatchSummary
 
 
 class SchemaAwareMockModel:
@@ -77,6 +78,15 @@ class SchemaAwareMockModel:
                 final_call="[MOCK] Neutral consensus",
                 confidence=0.5,
                 summary="[MOCK] Summary of debate.",
+            )
+        if s is WatchSummary:
+            return WatchSummary(
+                moat="🟢 [MOCK] Deep moat widening in serviceable markets.",
+                cycle_phase=CyclePhase.OPERATING_LEVERAGE,
+                financial_health="[MOCK] Net debt 0.39x EBITDA, FCF margin 18%.",
+                valuation="[MOCK] Fair at 12x P/FCF vs sector 14x.",
+                risks="[MOCK] Cyclical demand | FX drag | Regulatory headwinds.",
+                providers_used="mock",
             )
         return SimpleNamespace(text="[MOCK] unknown schema")
 

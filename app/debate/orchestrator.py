@@ -24,7 +24,7 @@ into ``ProviderRegistry`` whenever the caller asks for ``"mock"``.
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from types import SimpleNamespace
 from typing import Any
 
@@ -156,6 +156,55 @@ def _build_context(domain: str, target: str, target_date: date) -> dict[str, Any
     return pipeline_context.build_macro_context([target], as_of)
 
 
+def _should_use_graph(fmt: str | None, rounds: int) -> bool:
+    """Decide if a debate call should go through the LangGraph graph.py.
+
+    LangGraph path is used for debate mode (rounds > 1 or ``fmt == "debate"``).
+    Legacy path keeps ``engine.run_debate()`` for ``fmt in {"md", "json", "per-agent"}``.
+    """
+    if fmt in ("md", "json", "per-agent"):
+        return False
+    if rounds and rounds > 1:
+        return True
+    if fmt == "debate":
+        return True
+    return False
+
+
+def _state_to_debate_result(
+    state: dict[str, Any],
+    target: str,
+    domain: str,
+    target_date: date,
+    provider_name: str,
+    analysts: list[str],
+    context_md: str,
+    include_synthesis: bool,
+) -> DebateResult:
+    """Convert the final graph state dict into a ``DebateResult``.
+
+    Mirrors the ``DebateResult`` constructor in ``engine.run_debate`` so
+    downstream consumers (formatter, CLI writer, Langfuse scoring) see an
+    identical shape regardless of whether the engine or the graph was used.
+    """
+    theses = list(state.get("theses") or [])
+    rebuttals = list(state.get("rebuttals") or [])
+    verdict = state.get("verdict") if include_synthesis else None
+    return DebateResult(
+        run_id=f"debate_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}",
+        domain=Domain(domain),
+        target=target,
+        target_date=target_date,
+        provider=provider_name,
+        analysts=list(analysts),
+        context={"rendered_markdown": context_md},
+        theses=theses,
+        rebuttals=rebuttals,
+        verdict=verdict,
+        created_at=datetime.now().isoformat(timespec="seconds"),
+    )
+
+
 @observe(name="debate.orchestrator", as_type="span")
 def orchestrate_debate(
     *,
@@ -169,6 +218,8 @@ def orchestrate_debate(
     session_id: str | None = None,
     ctx: dict[str, Any] | None = None,
     trace: DebateTrace | None = None,
+    output_format: str | None = None,
+    use_graph: bool | None = None,
 ) -> DebateResult:
     """Run a full debate (data ingest → theses → rebuttals → synthesis) and
     return the structured ``DebateResult``.
@@ -189,6 +240,13 @@ def orchestrate_debate(
             attributes (session_id, tags, metadata, trace_name) via
             ``langfuse.propagate_attributes`` — no-op when Langfuse env
             vars are missing.
+        output_format: optional CLI ``--format`` value (``"md"``, ``"json"``,
+            ``"per-agent"``, ``"debate"``). When provided, used together with
+            ``rounds`` to decide whether to route through the LangGraph graph
+            (``app/debate/graph.py``) or fall back to ``engine.run_debate``.
+        use_graph: explicit override for the graph/legacy routing decision.
+            When ``None``, the decision is derived from
+            ``_should_use_graph(output_format, rounds)``.
 
     Returns:
         Fully populated ``DebateResult``.
@@ -204,6 +262,10 @@ def orchestrate_debate(
 
     _ensure_mock_provider_is_schema_aware(provider_name)
 
+    if session_id is None:
+        session_id = f"debate-{domain}-{target}-{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        log.info("debate.session_id_auto_generated", session_id=session_id)
+
     if ctx is None:
         ctx = _build_context(domain, target, target_date)
     context_md = pipeline_context.render_context_markdown(ctx, kind=domain)
@@ -215,6 +277,9 @@ def orchestrate_debate(
     if domain == "company":
         sector = (ctx.get("quote") or {}).get("sector")
 
+    if use_graph is None:
+        use_graph = _should_use_graph(output_format, rounds)
+
     with trace.attributes(
         session_id=session_id,
         tags=[f"domain:{domain}", f"target:{target}"] + [f"analyst:{a}" for a in analysts],
@@ -224,21 +289,76 @@ def orchestrate_debate(
             "include_synthesis": include_synthesis,
             "provider": provider_name,
             "sector": sector,
+            "execution_path": "graph" if use_graph else "engine",
         },
         name=f"debate.{domain}.{target}",
     ):
-        result = engine.run_debate(
-            analysts=list(analysts),
-            target=target,
-            domain=domain,
-            target_date=target_date,
-            context_md=context_md,
-            rounds=rounds,
-            provider_name=provider_name,
-            include_synthesis=include_synthesis,
-            callback=trace.callback,
-            sector=sector,
-        )
+        if use_graph:
+            from app.debate.graph import run_debate_graph
+
+            log.info(
+                "debate.orchestrator.route",
+                target=target,
+                path="graph",
+                output_format=output_format,
+                rounds=rounds,
+            )
+            initial_state: dict[str, Any] = {
+                "analysts": list(analysts),
+                "target": target,
+                "domain": domain,
+                "target_date": target_date,
+                "context_md": context_md,
+                "context_raw": dict(ctx),
+                "sector": sector,
+                "theses": [],
+                "rebuttals": [],
+                "verdict": None,
+                "round": 0,
+                "rounds": rounds,
+                "provider_name": provider_name,
+                "include_synthesis": include_synthesis,
+                "run_id": f"debate_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}",
+            }
+            thread_id = session_id or f"debate-{domain}-{target}"
+            graph_callbacks: list[Any] | None = None
+            if getattr(trace, "enabled", False) and trace.callback is not None:
+                graph_callbacks = [trace.callback]
+            final_state = run_debate_graph(
+                initial_state,
+                thread_id=thread_id,
+                callbacks=graph_callbacks,
+            )
+            result = _state_to_debate_result(
+                final_state,
+                target=target,
+                domain=domain,
+                target_date=target_date,
+                provider_name=provider_name,
+                analysts=list(analysts),
+                context_md=context_md,
+                include_synthesis=include_synthesis,
+            )
+        else:
+            log.info(
+                "debate.orchestrator.route",
+                target=target,
+                path="engine",
+                output_format=output_format,
+                rounds=rounds,
+            )
+            result = engine.run_debate(
+                analysts=list(analysts),
+                target=target,
+                domain=domain,
+                target_date=target_date,
+                context_md=context_md,
+                rounds=rounds,
+                provider_name=provider_name,
+                include_synthesis=include_synthesis,
+                callback=trace.callback,
+                sector=sector,
+            )
 
     log.info(
         "debate.orchestrator.complete",
