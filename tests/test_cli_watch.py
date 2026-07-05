@@ -32,13 +32,13 @@ def _run_cli(*args: str, env_override: dict[str, str] | None = None) -> subproce
         [sys.executable, "-m", "app.main", *args],
         capture_output=True,
         text=True,
-        cwd=str(REPO_ROOT),
+        cwd=os.getcwd(),
         env=env,
     )
 
 
 def _seed_sample_debate(tmp_path: Path, ticker: str = "XOM", sector: str = "Energy") -> Path:
-    ticker_dir = tmp_path / "company" / sector / ticker
+    ticker_dir = tmp_path / "out" / "company" / sector / ticker
     ticker_dir.mkdir(parents=True, exist_ok=True)
     (ticker_dir / SAMPLE_DEBATE_NAME).write_text(SAMPLE_DEBATE, encoding="utf-8")
     (ticker_dir / SAMPLE_META_NAME).write_text(SAMPLE_META, encoding="utf-8")

@@ -20,7 +20,7 @@ from tests._mock_provider import SchemaAwareMockProvider
 _AUTO_SID_RE = re.compile(r"^debate-[a-z]+-[A-Za-z0-9._]+-\d{8}_\d{6}$")
 
 
-REPO_ROOT = Path("/home/epmq-cyber/Área de Trabalho/projects/financial-adviser")
+REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 @pytest.fixture
