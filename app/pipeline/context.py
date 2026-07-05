@@ -83,7 +83,7 @@ def _build_macro_for_company() -> dict[str, Any]:
     return {"indicators": indicators}
 
 
-def build_company_context(ticker: str) -> dict[str, Any]:
+def build_company_context(ticker: str, *, with_filings: bool = False) -> dict[str, Any]:
     ticker = ticker.upper().strip()
     log.info("pipeline.context.build_company", ticker=ticker)
 
@@ -96,7 +96,7 @@ def build_company_context(ticker: str) -> dict[str, Any]:
     cik = (edgar_packet or {}).get("cik")
     events = edgar.fetch_material_events(cik, ticker=ticker) if cik else []
 
-    return {
+    ctx: dict[str, Any] = {
         "ticker": ticker,
         "edgar": edgar_packet,
         "quote": quote,
@@ -105,6 +105,24 @@ def build_company_context(ticker: str) -> dict[str, Any]:
         "news": news_items,
         "material_events": events,
     }
+    from app.filings import cache as filings_cache
+
+    if with_filings:
+        from app.filings.summarizer import get_or_build_summary
+
+        filing = get_or_build_summary(ticker, provider_name="minimax")
+    else:
+        cached_date = filings_cache.latest_filing_date(ticker)
+        filing = filings_cache.get(ticker, cached_date) if cached_date else None
+    if filing is not None:
+        ctx["filing_summary"] = filing
+        log.info(
+            "pipeline.context.filing_attached",
+            ticker=ticker,
+            with_filings=with_filings,
+            from_cache=not with_filings,
+        )
+    return ctx
 
 
 def build_macro_context(indicator_ids: list[str] | None = None, as_of: str | None = None) -> dict[str, Any]:
@@ -198,6 +216,14 @@ def _render_company(ctx: dict[str, Any]) -> str:
                     lines.append(f"    - {k}: {_fmt_billions(v)}")
             if lines:
                 sections.append(f"- **{period}**\n" + "\n".join(lines))
+
+    filing = ctx.get("filing_summary")
+    if filing is not None:
+        sections.append("\n## 10-K Narrative Summary")
+        sections.append(f"_Source: {filing.form} filed {filing.filing_date}_\n")
+        sections.append(f"**Business & Market Risk:** {filing.business_and_market_risk}\n")
+        sections.append(f"**Risk Factors:** {filing.risk_factors}\n")
+        sections.append(f"**MD&A Highlights:** {filing.md_and_a}\n")
 
     if quote:
         sections.append("\n## Market quote (yfinance)")

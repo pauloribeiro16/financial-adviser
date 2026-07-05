@@ -56,6 +56,36 @@ LEGACY_FORMATS = {"md", "json", "per-agent"}
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Multi-persona macro / company assessment")
+    subparsers = p.add_subparsers(dest="subcommand", required=False)
+
+    watch = subparsers.add_parser(
+        "watch",
+        help="Refresh surveillance table for a sector (S14).",
+        description="Run the S14 surveillance pipeline that aggregates "
+                    "the latest per-ticker debates into a sector "
+                    "watch-table under <output>/<sector>/<ticker>/current.md.",
+    )
+    watch.add_argument(
+        "--sector", default=None,
+        help="Sector name (e.g. Energy, Technology, Healthcare, Financial Services).",
+    )
+    watch.add_argument(
+        "--ticker", default=None,
+        help="Single ticker to refresh (requires --sector).",
+    )
+    watch.add_argument(
+        "--all", dest="all_sectors", action="store_true",
+        help="Refresh every known sector instead of one.",
+    )
+    watch.add_argument(
+        "--provider", default="mock", choices=["mock", "minimax"],
+        help="LLM provider (default: mock).",
+    )
+    watch.add_argument(
+        "--output", default=None,
+        help="Output root directory (default: ./out/surveillance).",
+    )
+
     p.add_argument("--analysts", default=None,
                    help="Comma-separated persona IDs (overrides --analysts-default / --analysts-all)")
     p.add_argument("--analysts-all", action="store_true",
@@ -90,6 +120,8 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--rich", action="store_true",
                    help="In debate mode with no --output and a TTY stdout, render the result "
                         "via rich tables/colors instead of writing Markdown.")
+    p.add_argument("--with-filings", action="store_true", default=False,
+                   help="Download and summarize latest 10-K before debate (adds ~30s, ~$0.03).")
     p.add_argument("--env", default="development", choices=["development", "production"])
     return p.parse_args(argv)
 
@@ -394,6 +426,11 @@ def _run_debate(
         try:
             results: list[DebateResult] = []
             for tgt in targets:
+                ctx = None
+                if args.with_filings and domain == "company":
+                    from app.pipeline.context import build_company_context
+
+                    ctx = build_company_context(tgt, with_filings=True)
                 results.append(
                     run_debate_only(
                         analysts=analysts,
@@ -405,6 +442,7 @@ def _run_debate(
                         include_synthesis=include_synthesis,
                         session_id=args.session_id,
                         output_format=args.format,
+                        ctx=ctx,
                     )
                 )
         except RuntimeError as e:
@@ -423,6 +461,11 @@ def _run_debate(
         for tgt in targets:
             run_ts = run_timestamp()
             completed_at = datetime.now().isoformat(timespec="seconds")
+            ctx = None
+            if args.with_filings and domain == "company":
+                from app.pipeline.context import build_company_context
+
+                ctx = build_company_context(tgt, with_filings=True)
             result = run_debate_only(
                 analysts=analysts,
                 target=tgt,
@@ -433,6 +476,7 @@ def _run_debate(
                 include_synthesis=include_synthesis,
                 session_id=args.session_id,
                 output_format=args.format,
+                ctx=ctx,
             )
 
             if domain == "company":
@@ -648,6 +692,7 @@ def _interactive_pick(
         "rounds": int(picked["rounds"]),
         "include_synthesis": bool(picked["include_synthesis"]),
         "analysts": [str(a) for a in picked["analysts"]],
+        "with_filings": bool(picked.get("with_filings", False)),
     }
 
 
@@ -657,6 +702,8 @@ def _apply_pick(args: argparse.Namespace, picked: dict[str, Any]) -> None:
     args.format = picked["format"]
     args.rounds = picked["rounds"]
     args.no_synthesis = not picked["include_synthesis"]
+    if getattr(args, "with_filings", None) is not True:
+        args.with_filings = bool(picked.get("with_filings", False))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -665,6 +712,22 @@ def main(argv: list[str] | None = None) -> int:
         load_dotenv(dotenv_path=Path(__file__).resolve().parent.parent / ".env", override=False)
     os.environ["MFL_ENV"] = args.env
     setup_logging(service="mi")
+
+    if getattr(args, "subcommand", None) == "watch":
+        from app.watch.cli import cmd_watch as _cmd_watch
+
+        output_value = getattr(args, "output", None)
+        output_root = (
+            Path(output_value) if output_value else Path("./out/surveillance")
+        )
+        rc = _cmd_watch(
+            sector=getattr(args, "sector", None),
+            ticker=getattr(args, "ticker", None),
+            all_sectors=getattr(args, "all_sectors", False),
+            provider=getattr(args, "provider", "mock"),
+            output=output_root,
+        )
+        return rc
 
     if args.indicators == "":
         print(
@@ -702,6 +765,22 @@ def main(argv: list[str] | None = None) -> int:
         picked = _interactive_pick(args, domain, target, indicators, analysts_default)
         if picked is None:
             return 130
+        if picked.get("mode") == "watch":
+            from app.watch.cli import cmd_watch as _cmd_watch
+
+            output_root = Path(
+                picked.get("output")
+                or getattr(args, "output", None)
+                or "./out/surveillance"
+            )
+            ticker = picked.get("target") if picked.get("single_ticker") else None
+            return _cmd_watch(
+                sector=picked.get("sector"),
+                ticker=ticker,
+                all_sectors=picked.get("all_sectors", False),
+                provider=picked.get("provider", "mock"),
+                output=output_root,
+            )
     elif domain is None:
         legacy_analysts = _resolve_analysts(args, analysts_default)
         legacy_compatible = (

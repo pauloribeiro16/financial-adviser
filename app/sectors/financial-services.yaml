@@ -1,0 +1,57 @@
+sector: Financial Services
+indicators:
+  - id: nim
+    name: "Net Interest Margin"
+    extract: "fundamentals.nim"
+    healthier_is: higher
+    healthy_threshold: 0.030
+    warning_threshold: 0.020
+    unit: "pct"
+
+  - id: cet1_ratio
+    name: "CET1 Capital Ratio"
+    extract: "fundamentals.cet1_ratio"
+    healthier_is: higher
+    healthy_threshold: 0.13
+    warning_threshold: 0.105
+    unit: "pct"
+
+  - id: loan_loss_provisions
+    name: "Loan Loss Provisions / Loans"
+    extract: "fundamentals.loan_loss_provisions"
+    healthier_is: lower
+    healthy_threshold: 0.005
+    warning_threshold: 0.015
+    unit: "pct"
+
+  - id: roa
+    name: "Return on Assets"
+    extract: "fundamentals.roa"
+    healthier_is: higher
+    healthy_threshold: 0.012
+    warning_threshold: 0.007
+    unit: "pct"
+
+  - id: roe
+    name: "Return on Equity"
+    extract: "fundamentals.roe"
+    healthier_is: higher
+    healthy_threshold: 0.13
+    warning_threshold: 0.08
+    unit: "pct"
+
+  - id: cost_income_ratio
+    name: "Cost / Income Ratio"
+    extract: "fundamentals.cost_income_ratio"
+    healthier_is: lower
+    healthy_threshold: 0.55
+    warning_threshold: 0.70
+    unit: "pct"
+
+  - id: tier1_capital_ratio
+    name: "Tier 1 Capital Ratio"
+    extract: "fundamentals.tier1_capital_ratio"
+    healthier_is: higher
+    healthy_threshold: 0.12
+    warning_threshold: 0.10
+    unit: "pct"
