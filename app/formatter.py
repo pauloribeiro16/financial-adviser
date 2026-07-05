@@ -20,6 +20,7 @@ __all__ = [
     "ensure_parent_dir",
     "slugify",
     "run_timestamp",
+    "output_root",
     "run_dir",
     "per_agent_dir",
     "output_path",
@@ -180,15 +181,34 @@ def run_timestamp() -> str:
     return datetime.now().strftime("%Y-%m-%dT%H-%M-%S_%f")[:-3]
 
 
-def run_dir(domain: str, group: str, target: str) -> Path:
-    """Per-target directory that holds all runs for this domain/group/target."""
-    base = Path("out") / domain / slugify(group) / target.upper()
+def output_root(provider: str) -> Path:
+    """Return the bucket root for a given provider.
+
+    Real-provider debates land under ``out/real/``; mock debates land under
+    ``out/mock/``. An empty or ``"mock"`` provider always routes to
+    ``out/mock/``. The user's real analyses (in ``out/real/``) are the only
+    ones auto-committed by ``app.main._auto_commit_and_push``.
+    """
+    bucket = "real" if provider and provider != "mock" else "mock"
+    return Path("out") / bucket
+
+
+def run_dir(domain: str, group: str, target: str, provider: str = "mock") -> Path:
+    """Per-target directory that holds all runs for this domain/group/target.
+
+    The output root is derived from ``provider`` via :func:`output_root`,
+    so a non-mock provider writes under ``out/real/`` and a mock provider
+    writes under ``out/mock/``.
+    """
+    base = output_root(provider) / domain / slugify(group) / target.upper()
     base.mkdir(parents=True, exist_ok=True)
     return base
 
 
-def per_agent_dir(domain: str, group: str, target: str) -> Path:
-    p = run_dir(domain, group, target) / "per_agent"
+def per_agent_dir(
+    domain: str, group: str, target: str, provider: str = "mock"
+) -> Path:
+    p = run_dir(domain, group, target, provider) / "per_agent"
     p.mkdir(parents=True, exist_ok=True)
     return p
 
@@ -204,7 +224,10 @@ def output_path(
 ) -> Path:
     """Full path for a single output file."""
     safe_provider = slugify(provider) or "provider"
-    return run_dir(domain, group, target) / f"{run_ts}_{safe_provider}_{kind}.{ext}"
+    return (
+        run_dir(domain, group, target, provider)
+        / f"{run_ts}_{safe_provider}_{kind}.{ext}"
+    )
 
 
 def _render_single(assessment: Assessment, meta: dict) -> str:

@@ -94,7 +94,7 @@ def test_debate_writes_all_default_files(tmp_path: Path) -> None:
     )
     assert proc.returncode == 0, f"stderr: {proc.stderr}\nstdout: {proc.stdout}"
 
-    base = tmp_path / "out" / "company" / "technology" / "AAPL"
+    base = tmp_path / "out" / "mock" / "company" / "technology" / "AAPL"
     assert base.is_dir(), f"missing base dir; tree: {sorted((tmp_path / 'out').rglob('*'))}"
     run_subdirs = [p for p in base.iterdir() if p.is_dir()]
     assert len(run_subdirs) == 1, f"expected one run subdir, got: {run_subdirs}"
@@ -138,7 +138,7 @@ def test_per_agent_files_under_run_subdir(tmp_path: Path) -> None:
     )
     assert proc.returncode == 0, f"stderr: {proc.stderr}\nstdout: {proc.stdout}"
 
-    base = tmp_path / "out" / "company" / "technology" / "AAPL"
+    base = tmp_path / "out" / "mock" / "company" / "technology" / "AAPL"
     shared_pa = base / "per_agent"
     assert not shared_pa.exists(), (
         f"shared per_agent/ should NOT exist; found: {sorted(shared_pa.rglob('*')) if shared_pa.exists() else 'gone'}"

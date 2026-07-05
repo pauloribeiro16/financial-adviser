@@ -54,7 +54,7 @@ def test_run_timestamp_format() -> None:
 def test_run_dir_creates_hierarchy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
     p = run_dir("company", "Financial Services", "JPM")
-    expected = (tmp_path / "out" / "company" / "financial-services" / "JPM").resolve()
+    expected = (tmp_path / "out" / "mock" / "company" / "financial-services" / "JPM").resolve()
     assert p.resolve() == expected
     assert expected.is_dir()
     assert (expected / "per_agent").exists() is False
@@ -72,7 +72,7 @@ def test_output_path_full(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> No
         "md",
     )
     expected = (
-        tmp_path / "out" / "company" / "financial-services" / "JPM" /
+        tmp_path / "out" / "real" / "company" / "financial-services" / "JPM" /
         "2026-07-03T14-23-45_123_minimax_debate.md"
     ).resolve()
     assert p.resolve() == expected
@@ -82,7 +82,7 @@ def test_output_path_full(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> No
 def test_per_agent_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
     p = per_agent_dir("macro", "US.FFR", "US.FFR")
-    expected = (tmp_path / "out" / "macro" / "us-ffr" / "US.FFR" / "per_agent").resolve()
+    expected = (tmp_path / "out" / "mock" / "macro" / "us-ffr" / "US.FFR" / "per_agent").resolve()
     assert p.resolve() == expected
     assert expected.is_dir()
 
@@ -113,7 +113,7 @@ def test_e2e_company_debate_writes_to_new_structure(
         cwd=tmp_path,
     )
     assert result.returncode == 0, f"stderr: {result.stderr}\nstdout: {result.stdout}"
-    base = tmp_path / "out" / "company" / "technology" / "AAPL"
+    base = tmp_path / "out" / "mock" / "company" / "technology" / "AAPL"
     assert base.is_dir(), f"missing dir; tree: {list((tmp_path / 'out').rglob('*'))}"
     run_subdirs = [p for p in base.iterdir() if p.is_dir()]
     assert len(run_subdirs) == 1, f"expected one run subdir, got: {run_subdirs}"
@@ -146,7 +146,7 @@ def test_e2e_macro_debate_writes_to_new_structure(
         cwd=tmp_path,
     )
     assert result.returncode == 0, f"stderr: {result.stderr}\nstdout: {result.stdout}"
-    matches = list((tmp_path / "out" / "macro").rglob("*_mock_debate.md"))
+    matches = list((tmp_path / "out" / "mock" / "macro").rglob("*_mock_debate.md"))
     assert len(matches) == 1, f"files: {matches}"
     assert "us-ffr" in str(matches[0])
     meta = json.loads(matches[0].parent.glob("*_mock_meta.json").__next__().read_text(encoding="utf-8"))
@@ -168,7 +168,7 @@ def test_e2e_multi_target(
         cwd=tmp_path,
     )
     assert result.returncode == 0, f"stderr: {result.stderr}\nstdout: {result.stdout}"
-    base = tmp_path / "out" / "company" / "financial-services"
+    base = tmp_path / "out" / "mock" / "company" / "financial-services"
     jpm_dir = base / "JPM"
     bac_dir = base / "BAC"
     assert jpm_dir.is_dir(), f"missing JPM dir; tree: {sorted(base.rglob('*'))}"
@@ -214,7 +214,7 @@ def test_meta_json_complete_keys(
         cwd=tmp_path,
     )
     assert result.returncode == 0, f"stderr: {result.stderr}"
-    base = tmp_path / "out" / "company" / "technology" / "AAPL"
+    base = tmp_path / "out" / "mock" / "company" / "technology" / "AAPL"
     run_subdirs = [p for p in base.iterdir() if p.is_dir()]
     assert run_subdirs, f"missing run subdir; tree: {sorted(base.rglob('*'))}"
     meta_files = sorted(run_subdirs[0].glob("*_mock_meta.json"))
@@ -276,7 +276,7 @@ def test_per_agent_writes_subdirectory(
         cwd=tmp_path,
     )
     assert result.returncode == 0, f"stderr: {result.stderr}\nstdout: {result.stdout}"
-    base = tmp_path / "out" / "company" / "technology" / "AAPL"
+    base = tmp_path / "out" / "mock" / "company" / "technology" / "AAPL"
     run_subdirs = [p for p in base.iterdir() if p.is_dir()]
     assert run_subdirs, f"missing run subdir; tree: {sorted(base.rglob('*'))}"
     pa_dir = run_subdirs[0] / "per_agent"
@@ -303,5 +303,5 @@ def test_provider_slug_in_filename(
         cwd=tmp_path,
     )
     assert result.returncode == 0, f"stderr: {result.stderr}"
-    matches = list((tmp_path / "out" / "macro").rglob("*_mock_data.json"))
+    matches = list((tmp_path / "out" / "mock" / "macro").rglob("*_mock_data.json"))
     assert matches, f"no data.json written; tree: {sorted((tmp_path / 'out').rglob('*'))}"

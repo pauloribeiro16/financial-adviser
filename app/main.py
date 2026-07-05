@@ -124,6 +124,11 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--with-filings", action="store_true", default=False,
                    help="Download and summarize latest 10-K before debate (adds ~30s, ~$0.03).")
     p.add_argument("--env", default="development", choices=["development", "production"])
+    p.add_argument(
+        "--clean-mocks",
+        action="store_true",
+        help="Delete every file under out/mock/ (manual cleanup of mock outputs).",
+    )
     return p.parse_args(argv)
 
 
@@ -367,7 +372,7 @@ def _run_legacy(
             print(f"Written: {run_subdir}/  ({len(results)} assessments)", file=sys.stderr)
         return 0
 
-    target_dir = run_dir("macro", indicator_id, indicator_id)
+    target_dir = run_dir("macro", indicator_id, indicator_id, args.provider)
     run_subdir = target_dir / f"{run_ts}_{args.provider}"
     run_subdir.mkdir(parents=True, exist_ok=True)
     _write_legacy_tree(run_subdir, results, meta, run_ts, args.provider)
@@ -498,7 +503,7 @@ def _run_debate(
                     print(f"Written: {run_subdir}/  (1 debate)", file=sys.stderr)
                 continue
 
-            target_dir = run_dir(domain, target_group, tgt)
+            target_dir = run_dir(domain, target_group, tgt, args.provider)
             run_subdir = target_dir / f"{run_ts}_{args.provider}"
             run_subdir.mkdir(parents=True, exist_ok=True)
             _write_debate_tree(run_subdir, result, meta, run_ts, args.provider)
@@ -615,6 +620,23 @@ def _write_legacy_tree(
     _write_meta_json(out_dir / f"{run_ts}_{provider}_meta.json", meta)
 
 
+def _clean_mocks() -> int:
+    """Delete every file under ``out/mock/`` and report the count."""
+    import shutil
+
+    mock_root = Path("out") / "mock"
+    if not mock_root.exists():
+        print(
+            f"No mock directory to clean ({mock_root} does not exist).",
+            file=sys.stderr,
+        )
+        return 0
+    count = sum(1 for p in mock_root.rglob("*") if p.is_file())
+    shutil.rmtree(mock_root)
+    print(f"Removed {count} mock files from {mock_root}.", file=sys.stderr)
+    return 0
+
+
 def _auto_commit_and_push(run_ts: str, target: str, provider: str, run_dir: Path) -> None:
     """Auto-commit and push a real-provider analysis to origin/master.
 
@@ -714,6 +736,9 @@ def main(argv: list[str] | None = None) -> int:
         load_dotenv(dotenv_path=Path(__file__).resolve().parent.parent / ".env", override=False)
     os.environ["MFL_ENV"] = args.env
     setup_logging(service="mi")
+
+    if args.clean_mocks:
+        return _clean_mocks()
 
     if getattr(args, "subcommand", None) == "watch":
         from app.watch.cli import cmd_watch as _cmd_watch
