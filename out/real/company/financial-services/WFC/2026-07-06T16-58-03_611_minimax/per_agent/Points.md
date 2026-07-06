@@ -1,0 +1,9 @@
+### Points of disagreement
+- Direction of HY OAS read: Eisman initially called 399bp "tight by historical standards" (complacency), Gundlach correctly noted it is actually elevated vs 2021 cycle lows (~300bp) — direction matters for whether credit is priced for stress or calm
+- FCF conversion as bear signal: Burry (round 0) used -0.89x as primary bearish anchor; Buffett, Eisman, Taleb, and Gundlach explicitly discount it as a sector-misread metric for a bank expanding its balance sheet on purpose
+- Asset cap status: Burry (round 0) and Taleb treat the asset cap as still binding and a structural ceiling; Buffett (round 1 revised) argues the $19.52B FY2025 buyback pace proves the cap has been materially relaxed — the buyback trajectory itself is the evidence
+- Valuation as margin of safety: Burry (round 0) and Dalio see no margin of safety; Buffett (round 1 revised) sees 9%+ total shareholder yield (2.11% dividend + ~7% buyback yield) as providing a margin of safety sufficient to upgrade to BULLISH at 0.52 conviction
+- Q1 annualization: Burry treats $5.25B Q1 2026 as "bakes in optimism" at $21B run-rate; Buffett argues Q1 is seasonally the weakest quarter, meaning full-year 2026 could print $22-24B, beating FY2025
+- Yield curve interpretation: Gundlach frames steepening as NIM-compression risk; Eisman counter-argues steepening benefits bank NIM — the real risk is Fed CUTS, not steepening per se
+- Buffett (round 1) is the sole bull, upgrading to BULLISH at 0.52 conviction based on total shareholder yield and asset-cap loosening evidence; Eisman (round 1) is the most bearish at 0.55, arguing credit-cycle timing and regulatory overhang make the asymmetry unfavorable
+- Historical analogue: Burry draws a 2007 Citi/Wachovia parallel based on debt-funded buybacks and CRE concentration; no other persona endorses this comparison, and the asset cap context makes it a non-trivial distinction from pre-crisis peers

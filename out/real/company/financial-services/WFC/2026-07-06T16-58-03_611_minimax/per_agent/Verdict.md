@@ -1,0 +1,2 @@
+### Verdict
+I revise from BEARISH (0.42) to **NEUTRAL (0.42)**. The conviction stays the same because the data quality is too poor (missing CET1, stale credit spread, no TBVPS reconciliation, no segment NIM) to take a directional view with confidence. My prior bearish thesis was anchored on FCF conversion — which is the wrong metric for a bank expanding its balance sheet on purpose. The margin of safety is not present in either direction.

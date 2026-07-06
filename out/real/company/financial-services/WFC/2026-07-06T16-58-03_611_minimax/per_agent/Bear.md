@@ -1,0 +1,2 @@
+### Bear Case Synthesis
+The convergence of: (1) tight credit spreads signaling complacency, (2) decelerating earnings with no remaining operating leverage, (3) regulatory ceiling on capital return, (4) aggressive late-cycle balance sheet expansion ($2.21T assets, FCF -$19B), (5) unresolved CRE concentration risk in the footnotes, and (6) governance churn from three 8-K 5.02 events — this is the setup for a credit cycle that turns just as WFC's earnings stall. The bull case requires the asset cap to lift AND credit to hold — two conditions that may not be compatible.

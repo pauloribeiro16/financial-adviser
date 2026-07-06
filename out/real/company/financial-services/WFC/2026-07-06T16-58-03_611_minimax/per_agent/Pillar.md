@@ -1,0 +1,2 @@
+### Pillar 6 — Valuation: Cheap for a Reason
+1.64x P/B, 13.5x trailing P/E, 11.0x forward P/E, 2.11% dividend yield. On absolute metrics this screens cheap. But the market is correctly pricing WFC at a discount to high-quality peers (JPM ~2.2x P/B) because of the regulatory overhang. The question is not whether WFC is cheap — it is — but whether the overhang resolves before credit deteriorates. With HY OAS at 399bp and consensus pricing in a soft landing, the asymmetry is unfavorable. Rating: 🟡 — optically cheap, fundamentally fairly priced for the risk.
