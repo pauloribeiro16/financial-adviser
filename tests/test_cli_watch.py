@@ -164,7 +164,6 @@ def test_existing_debate_cli_still_works(tmp_path: Path) -> None:
         "--analysts", "buffett,taleb",
         "--provider", "mock",
         "--rounds", "1",
-        "--format", "debate",
         "--output", str(output),
         "--env", "development",
     )

@@ -5,10 +5,16 @@ pipeline. Dispatch rule:
 
     legacy mode  ←→  domain=macro AND exactly 1 analyst AND exactly 1
                      indicator AND no explicit ``--rounds > 1`` AND no
-                     ``--no-synthesis`` AND ``--format`` in {md,json,per-agent}.
+                     ``--no-synthesis``.
     debate mode  ←→  everything else (``--company``, multi-analyst, multi-
-                     indicator, ``--rounds>1``, ``--format debate``,
-                     ``--interactive``, …).
+                     indicator, ``--rounds>1``, ``--interactive``, …).
+
+S17 — every debate writes the full set of files by default:
+``<TS>_<provider>_debate.md``, ``<TS>_<provider>_data.json``,
+``<TS>_<provider>_summary.md``, ``<TS>_<provider>_meta.json``, and
+``per_agent/<persona>.md`` for each analyst. The ``--format`` flag was
+removed in S17 — there is no user choice anymore. ``--output PATH``
+still bypasses the structure for scripting.
 """
 
 from __future__ import annotations
@@ -30,8 +36,6 @@ from app.cli_menu import (
 )
 from app.formatter import (
     ensure_parent_dir,
-    output_path,
-    per_agent_dir,
     render,
     render_debate_rich,
     render_per_agent,
@@ -51,7 +55,7 @@ except ImportError:
     HAS_DOTENV = False
 
 DEFAULT_INDICATOR = "US.UST10Y"
-LEGACY_FORMATS = {"md", "json", "per-agent"}
+DEFAULT_OUTPUT_FORMAT = "debate"
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -103,9 +107,6 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                    help="Target date YYYY-MM-DD (default: today)")
     p.add_argument("--target-date", dest="target_date", default=None,
                    help="Alias for --date")
-    p.add_argument("--format", default="debate", choices=["md", "json", "per-agent", "debate"],
-                   help="Output format (default: debate). Legacy formats (md/json/per-agent) "
-                        "trigger the legacy runner when conditions match.")
     p.add_argument("--output", default=None,
                    help="Write output to file/dir (legacy: per-agent→./out/run_<TS>/, md→./out/run_<TS>.md, "
                         "json→stdout; debate→./out/debate_<TS>/ or --output PATH).")
@@ -123,6 +124,11 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--with-filings", action="store_true", default=False,
                    help="Download and summarize latest 10-K before debate (adds ~30s, ~$0.03).")
     p.add_argument("--env", default="development", choices=["development", "production"])
+    p.add_argument(
+        "--clean-mocks",
+        action="store_true",
+        help="Delete every file under out/mock/ (manual cleanup of mock outputs).",
+    )
     return p.parse_args(argv)
 
 
@@ -157,12 +163,14 @@ def _decide_mode(
 
     ``mode`` is either ``"legacy"`` or ``"debate"``. ``rounds_effective`` is
     the rounds count to actually use (legacy always treats rounds as 1).
+
+    S17 — there is no ``--format`` flag anymore; the default behavior is
+    always "debate" mode with the full set of output files. Legacy mode is
+    only entered for the trivial single-analyst/single-indicator macro case.
     """
     if args.interactive:
         return "debate", rounds if rounds is not None else 2, include_synthesis
     if domain == "company":
-        return "debate", rounds if rounds is not None else 2, include_synthesis
-    if args.format == "debate":
         return "debate", rounds if rounds is not None else 2, include_synthesis
     if not include_synthesis:
         return "debate", rounds if rounds is not None else 2, include_synthesis
@@ -338,17 +346,16 @@ def _run_legacy(
         "target_date": target_date.isoformat(),
         "completed_at": completed_at,
         "n_assessments": len(results),
-        "formats": [args.format],
         "rounds": 1,
     }
 
     if args.output:
         out_path = Path(args.output)
-        if out_path.suffix.lower() in {".md", ".txt"} or args.format == "md":
+        if out_path.suffix.lower() in {".md", ".txt"}:
             target = ensure_parent_dir(out_path)
             target.write_text(render(results, meta), encoding="utf-8")
             print(f"Written: {target}", file=sys.stderr)
-        elif out_path.suffix.lower() == ".json" or args.format == "json":
+        elif out_path.suffix.lower() == ".json":
             payload = {
                 "run": meta,
                 "assessments": [a.model_dump(mode="json") for a in results],
@@ -359,52 +366,17 @@ def _run_legacy(
         else:
             run_dir_path = out_path
             run_dir_path.mkdir(parents=True, exist_ok=True)
-            per_agent = render_per_agent(results, meta)
-            for persona_id, items in per_agent.items():
-                persona_dir = run_dir_path / persona_id
-                persona_dir.mkdir(exist_ok=True)
-                for ind_id, md_content in items:
-                    (persona_dir / f"{ind_id}.md").write_text(md_content, encoding="utf-8")
-            (run_dir_path / "_summary.md").write_text(render_summary(results, meta), encoding="utf-8")
-            _write_meta_json(run_dir_path / f"{run_ts}_{args.provider}_meta.json", meta)
-            print(f"Written: {run_dir_path}/  ({len(results)} assessments)", file=sys.stderr)
-    elif args.format == "per-agent":
-        target_dir = run_dir("macro", indicator_id, indicator_id)
-        meta["formats"] = ["per-agent"]
-        per_agent = render_per_agent(results, meta)
-        for persona_id, items in per_agent.items():
-            persona_dir = per_agent_dir("macro", indicator_id, indicator_id)
-            for ind_id, md_content in items:
-                (persona_dir / f"{persona_id}_{ind_id}.md").write_text(md_content, encoding="utf-8")
-        (target_dir / f"{run_ts}_{args.provider}_summary.md").write_text(
-            render_summary(results, meta), encoding="utf-8"
-        )
-        _write_meta_json(target_dir / f"{run_ts}_{args.provider}_meta.json", meta)
-        print(f"Written: {target_dir}/  ({len(results)} assessments)", file=sys.stderr)
-    elif args.format == "md":
-        text = render(results, meta)
-        out_file = output_path("macro", indicator_id, indicator_id, run_ts, args.provider, "assessment", "md")
-        ensure_parent_dir(out_file).write_text(text, encoding="utf-8")
-        _write_meta_json(
-            run_dir("macro", indicator_id, indicator_id) / f"{run_ts}_{args.provider}_meta.json",
-            meta,
-        )
-        print(f"Written: {out_file}", file=sys.stderr)
-    else:
-        payload = {
-            "run": meta,
-            "assessments": [a.model_dump(mode="json") for a in results],
-        }
-        out_file = output_path("macro", indicator_id, indicator_id, run_ts, args.provider, "data", "json")
-        ensure_parent_dir(out_file).write_text(
-            json.dumps(payload, indent=2, default=str), encoding="utf-8"
-        )
-        _write_meta_json(
-            run_dir("macro", indicator_id, indicator_id) / f"{run_ts}_{args.provider}_meta.json",
-            meta,
-        )
-        print(f"Written: {out_file}", file=sys.stderr)
+            run_subdir = run_dir_path / f"{run_ts}_{args.provider}"
+            run_subdir.mkdir(parents=True, exist_ok=True)
+            _write_legacy_tree(run_subdir, results, meta, run_ts, args.provider)
+            print(f"Written: {run_subdir}/  ({len(results)} assessments)", file=sys.stderr)
+        return 0
 
+    target_dir = run_dir("macro", indicator_id, indicator_id, args.provider)
+    run_subdir = target_dir / f"{run_ts}_{args.provider}"
+    run_subdir.mkdir(parents=True, exist_ok=True)
+    _write_legacy_tree(run_subdir, results, meta, run_ts, args.provider)
+    print(f"Written: {run_subdir}/  ({len(results)} assessments)", file=sys.stderr)
     print(f"\nDone: {len(results)} assessments.", file=sys.stderr)
     return 0
 
@@ -441,7 +413,7 @@ def _run_debate(
                         provider_name=args.provider,
                         include_synthesis=include_synthesis,
                         session_id=args.session_id,
-                        output_format=args.format,
+                        output_format=DEFAULT_OUTPUT_FORMAT,
                         ctx=ctx,
                     )
                 )
@@ -475,7 +447,7 @@ def _run_debate(
                 provider_name=args.provider,
                 include_synthesis=include_synthesis,
                 session_id=args.session_id,
-                output_format=args.format,
+                output_format=DEFAULT_OUTPUT_FORMAT,
                 ctx=ctx,
             )
 
@@ -495,7 +467,6 @@ def _run_debate(
                 "rounds": rounds,
                 "include_synthesis": include_synthesis,
                 "completed_at": completed_at,
-                "formats": [args.format],
             }
             if domain == "company":
                 meta["sector"] = sector
@@ -525,82 +496,21 @@ def _run_debate(
                 else:
                     run_dir_path = out_path / tgt
                     run_dir_path.mkdir(parents=True, exist_ok=True)
-                    _write_debate_tree(
-                        run_dir_path, result, meta, run_ts, args.provider,
-                        fmt=args.format,
-                    )
-                    written_paths.append(run_dir_path)
-                    print(f"Written: {run_dir_path}/  (1 debate)", file=sys.stderr)
+                    run_subdir = run_dir_path / f"{run_ts}_{args.provider}"
+                    run_subdir.mkdir(parents=True, exist_ok=True)
+                    _write_debate_tree(run_subdir, result, meta, run_ts, args.provider)
+                    written_paths.append(run_subdir)
+                    print(f"Written: {run_subdir}/  (1 debate)", file=sys.stderr)
                 continue
 
-            if args.format == "json":
-                payload = {
-                    "run": meta,
-                    "debates": [result.model_dump(mode="json")],
-                }
-                out_file = output_path(
-                    domain, target_group, tgt, run_ts, args.provider, "data", "json"
-                )
-                ensure_parent_dir(out_file).write_text(
-                    json.dumps(payload, indent=2, default=str), encoding="utf-8"
-                )
-                _write_meta_json(
-                    run_dir(domain, target_group, tgt) / f"{run_ts}_{args.provider}_meta.json",
-                    meta,
-                )
-                written_paths.append(out_file)
-                print(f"Written: {out_file}", file=sys.stderr)
-                continue
-
-            if args.format == "rich":
-                rich_file = output_path(
-                    domain, target_group, tgt, run_ts, args.provider, "rich", "txt"
-                )
-                rich_buf = _capture_rich_text(result)
-                ensure_parent_dir(rich_file).write_text(rich_buf, encoding="utf-8")
-                _write_meta_json(
-                    run_dir(domain, target_group, tgt) / f"{run_ts}_{args.provider}_meta.json",
-                    meta,
-                )
-                written_paths.append(rich_file)
-                print(f"Written: {rich_file}", file=sys.stderr)
-                continue
-
-            if args.format == "per-agent":
-                pa_dir = per_agent_dir(domain, target_group, tgt)
-                debate_md = _render_debate_md(result)
-                sections = _split_debate_per_persona(debate_md)
-                for persona_id, sec_md in sections.items():
-                    (pa_dir / f"{persona_id}.md").write_text(sec_md, encoding="utf-8")
-                summary_md = _render_debate_summary(result, meta, completed_at)
-                target_dir = run_dir(domain, target_group, tgt)
-                (target_dir / f"{run_ts}_{args.provider}_debate.md").write_text(
-                    debate_md, encoding="utf-8"
-                )
-                (target_dir / f"{run_ts}_{args.provider}_summary.md").write_text(
-                    summary_md, encoding="utf-8"
-                )
-                _write_meta_json(
-                    target_dir / f"{run_ts}_{args.provider}_meta.json", meta
-                )
-                written_paths.append(target_dir)
-                print(f"Written: {target_dir}/  (1 debate)", file=sys.stderr)
-                continue
-
-            debate_md = _render_debate_md(result)
-            summary_md = _render_debate_summary(result, meta, completed_at)
-            target_dir = run_dir(domain, target_group, tgt)
-            (target_dir / f"{run_ts}_{args.provider}_debate.md").write_text(
-                debate_md, encoding="utf-8"
-            )
-            (target_dir / f"{run_ts}_{args.provider}_summary.md").write_text(
-                summary_md, encoding="utf-8"
-            )
-            _write_meta_json(
-                target_dir / f"{run_ts}_{args.provider}_meta.json", meta
-            )
-            written_paths.append(target_dir)
-            print(f"Written: {target_dir}/  (1 debate)", file=sys.stderr)
+            target_dir = run_dir(domain, target_group, tgt, args.provider)
+            run_subdir = target_dir / f"{run_ts}_{args.provider}"
+            run_subdir.mkdir(parents=True, exist_ok=True)
+            _write_debate_tree(run_subdir, result, meta, run_ts, args.provider)
+            written_paths.append(run_subdir)
+            print(f"Written: {run_subdir}/  (1 debate)", file=sys.stderr)
+            if args.provider != "mock":
+                _auto_commit_and_push(run_ts, tgt, args.provider, run_subdir)
     except RuntimeError as e:
         _print_error_provider(e)
         return 2
@@ -644,20 +554,137 @@ def _write_debate_tree(
     meta: dict[str, Any],
     run_ts: str,
     provider: str,
-    fmt: str,
 ) -> None:
     debate_md = _render_debate_md(result)
     completed_at = meta.get("completed_at") or datetime.now().isoformat(timespec="seconds")
     summary_md = _render_debate_summary(result, meta, completed_at)
     (out_dir / f"{run_ts}_{provider}_debate.md").write_text(debate_md, encoding="utf-8")
     (out_dir / f"{run_ts}_{provider}_summary.md").write_text(summary_md, encoding="utf-8")
-    if fmt == "per-agent":
-        sections = _split_debate_per_persona(debate_md)
-        pa_dir = out_dir / "per_agent"
-        pa_dir.mkdir(parents=True, exist_ok=True)
-        for persona_id, sec_md in sections.items():
-            (pa_dir / f"{persona_id}.md").write_text(sec_md, encoding="utf-8")
+    payload = {
+        "run": meta,
+        "debates": [result.model_dump(mode="json")],
+    }
+    (out_dir / f"{run_ts}_{provider}_data.json").write_text(
+        json.dumps(payload, indent=2, default=str, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    pa_dir = out_dir / "per_agent"
+    pa_dir.mkdir(parents=True, exist_ok=True)
+    sections = _split_debate_per_persona(debate_md)
+    for persona_id, sec_md in sections.items():
+        (pa_dir / f"{persona_id}.md").write_text(sec_md, encoding="utf-8")
     _write_meta_json(out_dir / f"{run_ts}_{provider}_meta.json", meta)
+
+
+def _write_legacy_tree(
+    out_dir: Path,
+    results: list[Any],
+    meta: dict[str, Any],
+    run_ts: str,
+    provider: str,
+) -> None:
+    """Write the full legacy-mode file set into ``out_dir`` (a per-run subdir).
+
+    Mirrors :func:`_write_debate_tree` for the Assessment-based legacy path.
+    Files produced:
+        - ``<TS>_<provider>_assessment.md``
+        - ``<TS>_<provider>_data.json``
+        - ``<TS>_<provider>_summary.md``
+        - ``<TS>_<provider>_meta.json``
+        - ``per_agent/<persona>_<indicator>.md`` per (persona, indicator) pair
+    """
+    assessment_md = render(results, meta)
+    (out_dir / f"{run_ts}_{provider}_assessment.md").write_text(
+        assessment_md, encoding="utf-8"
+    )
+    summary_md = render_summary(results, meta)
+    (out_dir / f"{run_ts}_{provider}_summary.md").write_text(
+        summary_md, encoding="utf-8"
+    )
+    payload = {
+        "run": meta,
+        "assessments": [a.model_dump(mode="json") for a in results],
+    }
+    (out_dir / f"{run_ts}_{provider}_data.json").write_text(
+        json.dumps(payload, indent=2, default=str, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    pa_dir = out_dir / "per_agent"
+    pa_dir.mkdir(parents=True, exist_ok=True)
+    per_agent = render_per_agent(results, meta)
+    for persona_id, items in per_agent.items():
+        for ind_id, md_content in items:
+            (pa_dir / f"{persona_id}_{ind_id}.md").write_text(
+                md_content, encoding="utf-8"
+            )
+    _write_meta_json(out_dir / f"{run_ts}_{provider}_meta.json", meta)
+
+
+def _clean_mocks() -> int:
+    """Delete every file under ``out/mock/`` and report the count."""
+    import shutil
+
+    mock_root = Path("out") / "mock"
+    if not mock_root.exists():
+        print(
+            f"No mock directory to clean ({mock_root} does not exist).",
+            file=sys.stderr,
+        )
+        return 0
+    count = sum(1 for p in mock_root.rglob("*") if p.is_file())
+    shutil.rmtree(mock_root)
+    print(f"Removed {count} mock files from {mock_root}.", file=sys.stderr)
+    return 0
+
+
+def _auto_commit_and_push(run_ts: str, target: str, provider: str, run_dir: Path) -> None:
+    """Auto-commit and push a real-provider analysis to origin/master.
+
+    Skips silently on any error so the debate run is never blocked by git
+    failures. Logs warnings on failure.
+    """
+    import subprocess
+
+    from app.logging import get_logger
+
+    log = get_logger(__name__)
+    try:
+        rel_path = run_dir.relative_to(Path.cwd())
+    except ValueError:
+        rel_path = run_dir
+    try:
+        subprocess.run(
+            ["git", "add", str(rel_path)],
+            check=True, capture_output=True, timeout=10,
+        )
+        diff_r = subprocess.run(
+            ["git", "diff", "--cached", "--name-only"],
+            check=True, capture_output=True, timeout=5, text=True,
+        )
+        if not diff_r.stdout.strip():
+            log.info("auto_commit.nothing_to_commit", target=target, provider=provider)
+            return
+        subprocess.run(
+            ["git", "commit", "-m", f"analysis: {run_ts} {target} {provider}"],
+            check=True, capture_output=True, timeout=15,
+        )
+        subprocess.run(
+            ["git", "push", "origin", "master"],
+            check=True, capture_output=True, timeout=30,
+        )
+        log.info("auto_commit.pushed", target=target, provider=provider, run_ts=run_ts)
+    except subprocess.CalledProcessError as e:
+        log.warning(
+            "auto_commit.failed",
+            target=target,
+            provider=provider,
+            error=str(e)[:200],
+            stderr=e.stderr.decode()[:200] if e.stderr else "",
+        )
+    except subprocess.TimeoutExpired as e:
+        log.warning("auto_commit.timeout", target=target, provider=provider, error=str(e))
+    except FileNotFoundError:
+        log.warning("auto_commit.git_not_found")
 
 
 def _interactive_pick(
@@ -675,7 +702,6 @@ def _interactive_pick(
         "provider": args.provider,
         "analysts": _resolve_analysts(args, analysts_default),
         "rounds": args.rounds if args.rounds is not None else 2,
-        "format": args.format,
         "include_synthesis": not args.no_synthesis,
     }
     try:
@@ -688,7 +714,6 @@ def _interactive_pick(
         "target": str(picked["target"]),
         "indicators": list(picked.get("indicators") or []),
         "provider": str(picked["provider"]),
-        "format": str(picked["format"]),
         "rounds": int(picked["rounds"]),
         "include_synthesis": bool(picked["include_synthesis"]),
         "analysts": [str(a) for a in picked["analysts"]],
@@ -699,7 +724,6 @@ def _interactive_pick(
 def _apply_pick(args: argparse.Namespace, picked: dict[str, Any]) -> None:
     """Mutate ``args`` and return the new (domain, target, indicators, analysts)."""
     args.provider = picked["provider"]
-    args.format = picked["format"]
     args.rounds = picked["rounds"]
     args.no_synthesis = not picked["include_synthesis"]
     if getattr(args, "with_filings", None) is not True:
@@ -712,6 +736,9 @@ def main(argv: list[str] | None = None) -> int:
         load_dotenv(dotenv_path=Path(__file__).resolve().parent.parent / ".env", override=False)
     os.environ["MFL_ENV"] = args.env
     setup_logging(service="mi")
+
+    if args.clean_mocks:
+        return _clean_mocks()
 
     if getattr(args, "subcommand", None) == "watch":
         from app.watch.cli import cmd_watch as _cmd_watch
@@ -784,8 +811,7 @@ def main(argv: list[str] | None = None) -> int:
     elif domain is None:
         legacy_analysts = _resolve_analysts(args, analysts_default)
         legacy_compatible = (
-            args.format in LEGACY_FORMATS
-            and not args.no_synthesis
+            not args.no_synthesis
             and args.rounds is None
             and not args.analysts_all
             and len(legacy_analysts) == 1

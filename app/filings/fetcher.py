@@ -10,7 +10,7 @@ from app.logging import get_logger
 
 log = get_logger(__name__)
 
-_SEC_ARCHIVES = "https://www.sec.gov/Archives"
+_SEC_ARCHIVES = "https://www.sec.gov/Archives/edgar/data"
 
 _MAX_ATTEMPTS = 3
 _RETRY_DELAY_S = 0.1
