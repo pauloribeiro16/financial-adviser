@@ -1,0 +1,9 @@
+### simons → dalio, gundlach, buffett, burry, simons, taleb
+
+- **Revised verdict:** NEUTRAL (conviction 0.42)
+- **Concessions:** All personas correctly identify the Capital Return phase using the $36.17B cumulative buybacks (2022-2025) vs $45.1B cumulative FCF — this is the strongest pillar claim across the board, well-cited.; The EBITDA trajectory $24.88B (2022) → $18.56B (2023) → $10.60B (2024) → $11.68B (2025) is correctly read by Gundlach, Burry, Simons, and Taleb as a clear cyclical rollover — 53% peak-to-trough drawdown is a defensible data citation.; Gundlach's Q1 2026 print observation ($511M NI on $34.2B revenue = 1.5% margin) vs FY2025 ($4.05B on $132.7B = 3.0%) is correctly sourced from XBRL companyfacts — cycle compression is real and accelerating.
+- **Disagreements:** Buffett's claim that ROIC of 14.1% is 'below the 15% threshold' and implies a structurally deteriorating moat is weakly grounded — the ROIC figure is single-point (FY2025), not cycle-normalized; a refiner's mid-cycle ROIC including 2022-2023 peaks would likely exceed 20%, and using trough-year ROIC to judge moat strength is the wrong lens for a commodity price-taker.; Dalio characterizes the $16.22B FY2025 debt issuance as 'funding buybacks at cycle-peak prices' — but $3.49B of FY2025 buybacks is the LOWEST of the four-year window ($11.92B/$11.57B/$9.19B/$3.49B), so the marginal claim conflates gross issuance with net buyback funding; net debt grew $4.93B in 2025, which is material but the framing overstates the mechanism.; Taleb's headline-driven 'melt-up regime precedes crack-spread reversals' claim is narratively compelling but weakly cited — a 52% 6-month rally (Zacks 2026-07-06) is a single observation, not a statistically validated pattern; the same source explicitly asks 'How to Play the Stock?' suggesting no consensus reversal signal.
+
+**Reasoning:**
+
+## Revising the Simons Quantitative Read
