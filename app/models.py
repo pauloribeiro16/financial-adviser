@@ -5,7 +5,7 @@ from datetime import date
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 _XML_TAG_RE = re.compile(r"<[^>]+>")
 
@@ -291,6 +291,14 @@ class FilingSummary(BaseModel):
     ticker: str
     filing_date: str
     form: str
-    business_and_market_risk: str = Field(..., max_length=500)
-    risk_factors: str = Field(..., max_length=500)
-    md_and_a: str = Field(..., max_length=500)
+    business_and_market_risk: str = Field(..., max_length=1500)
+    risk_factors: str = Field(..., max_length=1500)
+    md_and_a: str = Field(..., max_length=1500)
+
+    @model_validator(mode="after")
+    def _truncate_long_sections(self) -> FilingSummary:
+        for field_name in ("business_and_market_risk", "risk_factors", "md_and_a"):
+            value = getattr(self, field_name)
+            if len(value) > 1500:
+                setattr(self, field_name, value[:1497] + "…")
+        return self

@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import httpx
-from pydantic import BaseModel, Field
+import time
 
-from app.debate.engine import _invoke_with_fallback
+import httpx
+
 from app.filings import cache, prompts
 from app.filings.fetcher import download_10k_html
 from app.filings.section_parser import extract_sections
@@ -19,10 +19,9 @@ log = get_logger(__name__)
 _MAX_WORDS_DIRECT = 8000
 _CHUNK_WORDS = 4000
 _CHUNK_OVERLAP = 200
-
-
-class _SectionText(BaseModel):
-    text: str = Field(default="", max_length=600)
+_MAX_CHARS = 18000
+_MAX_RETRIES = 2
+_RETRY_BACKOFF_S = 2.0
 
 
 def _word_count(text: str) -> int:
@@ -45,20 +44,75 @@ def _chunk_text(text: str, chunk_words: int, overlap_words: int) -> list[str]:
     return chunks
 
 
+def _truncate(s: str, n: int) -> str:
+    if len(s) <= n:
+        return s
+    return s[:n] + "…"
+
+
+def _extract_text(response: object) -> str:
+    """Robustly extract text content from various response shapes."""
+    if response is None:
+        return ""
+    if isinstance(response, str):
+        return response.strip()
+    content = getattr(response, "content", None)
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        parts: list[str] = []
+        for block in content:
+            if isinstance(block, str):
+                parts.append(block)
+            elif isinstance(block, dict):
+                t = block.get("text")
+                if isinstance(t, str):
+                    parts.append(t)
+        return "\n".join(parts).strip()
+    text_attr = getattr(response, "text", None)
+    if isinstance(text_attr, str):
+        return text_attr.strip()
+    return str(response).strip()
+
+
 def _call_llm(provider, system_prompt: str, *, ticker: str, label: str) -> str:
-    """One LLM call returning a free-text summary (best-effort)."""
+    """One free-text LLM call with retry. Returns the assistant content."""
     msgs = [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": "Summarize the section above."},
     ]
-    try:
-        result = _invoke_with_fallback(provider, _SectionText, msgs)
-        if isinstance(result, _SectionText):
-            return result.text
-        return ""
-    except Exception as e:
-        log.warning("filings.summarize_call_failed", ticker=ticker, label=label, error=str(e)[:200])
-        return ""
+    last_err: str | None = None
+    for attempt in range(1, _MAX_RETRIES + 1):
+        try:
+            model = provider.get_model()
+            response = model.invoke(msgs)
+            text = _extract_text(response)
+            if text and not text.startswith("{"):
+                log.info(
+                    "filings.summarize.done",
+                    ticker=ticker, label=label,
+                    attempt=attempt, chars=len(text),
+                )
+                return text[:1500] if len(text) > 1500 else text
+            last_err = f"empty or JSON-shaped text: {text[:80]!r}"
+            log.warning(
+                "filings.summarize.bad_response",
+                ticker=ticker, label=label, attempt=attempt,
+                preview=text[:120],
+            )
+        except Exception as e:
+            last_err = str(e)[:200]
+            log.warning(
+                "filings.summarize.attempt_failed",
+                ticker=ticker, label=label, attempt=attempt, error=last_err,
+            )
+        if attempt < _MAX_RETRIES:
+            time.sleep(_RETRY_BACKOFF_S * attempt)
+    log.error(
+        "filings.summarize.gave_up",
+        ticker=ticker, label=label, error=last_err,
+    )
+    return ""
 
 
 def _summarize_section(
@@ -66,12 +120,12 @@ def _summarize_section(
 ) -> str:
     """Map-reduce: single call if <=8K words, else chunk + consolidate."""
     if _word_count(text) <= _MAX_WORDS_DIRECT:
-        return _call_llm(provider, template.format(text=text), ticker=ticker, label=label)
+        return _call_llm(provider, _truncate(template.format(text=text), _MAX_CHARS), ticker=ticker, label=label)
     log.info("filings.map_reduce", ticker=ticker, section=label, words=_word_count(text))
     chunks = _chunk_text(text, _CHUNK_WORDS, _CHUNK_OVERLAP)
     partials: list[str] = []
     for ch in chunks:
-        s = _call_llm(provider, template.format(text=ch), ticker=ticker, label=label)
+        s = _call_llm(provider, _truncate(template.format(text=ch), _MAX_CHARS), ticker=ticker, label=label)
         if s:
             partials.append(s)
     if not partials:
@@ -79,7 +133,7 @@ def _summarize_section(
     if len(partials) == 1:
         return partials[0]
     joined = "\n\n".join(f"[{i + 1}] {p}" for i, p in enumerate(partials))
-    consolidated_prompt = prompts.CONSOLIDATION_PROMPT.format(n=len(partials), partials=joined)
+    consolidated_prompt = prompts.CONSOLIDATION_PROMPT.format(n=len(partials), partials=_truncate(joined, _MAX_CHARS))
     consolidated = _call_llm(
         provider, consolidated_prompt, ticker=ticker, label=f"{label}_consolidate",
     )
