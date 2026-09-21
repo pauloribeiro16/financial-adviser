@@ -1,0 +1,18 @@
+{
+  "run_id": "debate_20260703_194400_878435",
+  "run_ts": "2026-07-03T19-44-00_287",
+  "domain": "company",
+  "target": "AAPL",
+  "target_date": "2026-07-03",
+  "analysts": [
+    "buffett"
+  ],
+  "provider": "mock",
+  "rounds": 1,
+  "include_synthesis": true,
+  "completed_at": "2026-07-03T19:44:00",
+  "formats": [
+    "debate"
+  ],
+  "sector": "Technology"
+}
